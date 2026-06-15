@@ -255,9 +255,18 @@ async def signup(req: SignupReq):
     await db.users.insert_one(doc)
 
     # Auto-link: if this user is a client, link to all iron_men who added this phone
+    # and backfill linked_user_id on existing entries & bills so the client sees historical data
     if req.role == "client":
         await db.clients.update_many(
             {"phone": req.phone, "linked_user_id": None},
+            {"$set": {"linked_user_id": user_id}},
+        )
+        await db.entries.update_many(
+            {"client_phone": req.phone, "linked_user_id": None},
+            {"$set": {"linked_user_id": user_id}},
+        )
+        await db.bills.update_many(
+            {"client_phone": req.phone, "linked_user_id": None},
             {"$set": {"linked_user_id": user_id}},
         )
 
