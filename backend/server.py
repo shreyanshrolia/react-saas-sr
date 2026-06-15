@@ -1008,7 +1008,19 @@ def _plan_amount(plan: str) -> int:
 
 
 async def _activate_subscription(user_id: str) -> dict:
-    new_end = now_utc() + timedelta(days=SUBSCRIPTION_DAYS)
+    # Start from the later of: now, or current subscription_ends_at.
+    # This preserves any unused trial days when the user pays mid-trial.
+    user = await db.users.find_one({"_id": user_id})
+    current_end_iso = user.get("subscription_ends_at") if user else None
+    base = now_utc()
+    if current_end_iso:
+        try:
+            cur_end = parse_iso(current_end_iso)
+            if cur_end > base:
+                base = cur_end
+        except Exception:
+            pass
+    new_end = base + timedelta(days=SUBSCRIPTION_DAYS)
     await db.users.update_one(
         {"_id": user_id},
         {"$set": {
