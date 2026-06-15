@@ -30,7 +30,7 @@ export default function ProfileScreen() {
           <Text style={styles.name}>{user.name}</Text>
           <View style={styles.roleBadge}>
             <Ionicons
-              name={user.role === "iron_man" ? "hammer" : "home"}
+              name={user.role === "iron_man" ? "shirt" : "home"}
               size={12}
               color={colors.primary}
             />

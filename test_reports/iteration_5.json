@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 5 backend testing: 21 new tests for notifications + confirmation flows + delete gating + trial-stacking + status derivation — all PASSED. Full regression 74/74 PASSED. Updated 2 stale tests (test_iteration2 expected old 'returned' status for linked-client returns; test_iteration4 expected ~30d delta without trial stacking) to match the new iteration-5 contract.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/pytest/pytest_iter5.xml",
+    "/app/test_reports/pytest/pytest_full_iter5.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1480 lines — strongly recommend splitting into routers/auth.py, routers/entries.py, routers/notifications.py, routers/bills.py, routers/subscription.py.",
+    "_refresh_subscription is called by /auth/me and /auth/login but NOT by /subscription/verify-payment. verify-payment returns subscription_status='active' immediately even if trial is still active; the very next /auth/me would flip it back to 'trial'. Behavior is correct per spec (#4) but UX-confusing; consider calling _refresh_subscription right after _activate_subscription so verify-payment returns the canonical derived status.",
+    "delete_requested_at is cleared on /delete-deny but NOT on /return/confirm or /return/deny. If a client requests deletion AND iron-man marks returned, the delete_requested_at lingers on the now-returned entry. Likely fine, but worth confirming product intent.",
+    "_create_notification silently no-ops when user_id is None. Good guard, but a debug log would help diagnose missed notifications during testing.",
+    "Hard-coded BASE_URL in conftest.py and test files — should source from env var. Already noted in prior iterations; still applicable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5.py (new — 21 tests, ~280 lines)",
+    "/app/backend/tests/test_iteration2.py (1-line fix: linked-client return now expects 'return_pending' instead of 'returned' per iteration-5 spec)",
+    "/app/backend/tests/test_iteration4_razorpay.py (delta_days assertion updated 28-31 → 72-76 to reflect trial-stacking per iteration-5 change #4)"
+  ],
+  "success_rate": {
+    "backend": "100% (74/74; iteration 5 subset: 21/21)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Used seed users from /app/memory/test_credentials.md. Tests created TEST_-prefixed unlinked clients (auto-cleaned in fixture teardown) and many entries on the iron→client linked record. Pre-existing 2025-06 month residue from prior iterations cleaned via pymongo to unblock test_iteration3 flake (4 entries, 1 bill, 7 payments removed). Test_iteration5 manipulates user.trial_ends_at and subscription_ends_at via pymongo to verify all 3 derivation states; final test restores both to now+45d so other users/tests remain consistent.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 5 contract: entry.status enum ∈ {'pending','return_pending','returned'}. Iron-man /return → 'return_pending' if linked, else 'returned'. Client /return/confirm → 'returned'; /return/deny → 'pending'. DELETE /entries/{id} returns 403 when linked; client /delete-request sets delete_requested_at + notifies iron; iron /delete-confirm hard-deletes; /delete-deny clears delete_requested_at. Notifications: new_entry, return_requested, return_confirmed, return_denied, delete_requested, delete_confirmed, delete_denied. Status derivation in _refresh_subscription: trial if (trial_ends_at>now AND sub_ends_at>now); active if (trial≤now AND sub>now); else expired. Trial stacking: _activate_subscription uses max(now, current_sub_end) + 30d. To reset a user's sub state in tests, use pymongo: db.users.update_one({'_id': uid}, {'$set': {'trial_ends_at': iso, 'subscription_ends_at': iso, 'subscription_status': 'trial'}}). Razorpay TEST keys still active; test_iteration4 makes ~14 real network calls to api.razorpay.com (each ~500ms).",
+  "rca_of_issue": "Two stale-test failures detected during regression were NOT bugs — they reflected old iteration-4 contract and were updated to match new iteration-5 spec: (1) test_iteration2 line 355 expected post-return status='returned' but new spec puts linked-client returns in 'return_pending' until client confirms. (2) test_iteration4 line 180 expected sub_ends_at ≈ now+30d but new trial-stacking pushes it to ~now+75d when activating during active trial. Also fixed a pre-existing data-isolation flake in test_iteration3 (accumulated 2025-06 entries across runs causing bill balance mismatch) by deleting stale records — root cause is the test re-creates the same client/month without cleanup; recommend main agent add a teardown to that test class in a future iteration."
+}

@@ -18,6 +18,7 @@ import { useAuth } from "@/src/contexts/AuthContext";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
 import { currentMonthKey, formatDate, formatINR } from "@/src/utils/format";
+import NotificationBell from "@/src/components/NotificationBell";
 
 type Filter = "all" | "pending" | "returned";
 
@@ -79,8 +80,11 @@ export default function ClientHome() {
             <Text style={styles.greeting}>{t("welcome_back")},</Text>
             <Text style={styles.name}>{user?.name}</Text>
           </View>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{user?.name.charAt(0).toUpperCase()}</Text>
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <NotificationBell />
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{user?.name.charAt(0).toUpperCase()}</Text>
+            </View>
           </View>
         </View>
 
@@ -175,7 +179,22 @@ export default function ClientHome() {
                   <Text style={styles.emptyText}>No records to show</Text>
                 </View>
               ) : (
-                filteredEntries.map((e) => <EntryCard key={e.id} entry={e} t={t} />)
+                filteredEntries.map((e) => (
+                  <EntryCard
+                    key={e.id}
+                    entry={e}
+                    t={t}
+                    onConfirmReturn={async () => {
+                      try { await api.post(`/entries/${e.id}/return/confirm`); load(); } catch {/* ignore */}
+                    }}
+                    onDenyReturn={async () => {
+                      try { await api.post(`/entries/${e.id}/return/deny`); load(); } catch {/* ignore */}
+                    }}
+                    onRequestDelete={async () => {
+                      try { await api.post(`/entries/${e.id}/delete-request`); load(); } catch {/* ignore */}
+                    }}
+                  />
+                ))
               )}
             </View>
           </>
@@ -211,17 +230,35 @@ function FilterChip({
   );
 }
 
-function EntryCard({ entry, t }: { entry: Entry; t: (k: any) => string }) {
+function EntryCard({
+  entry,
+  t,
+  onConfirmReturn,
+  onDenyReturn,
+  onRequestDelete,
+}: {
+  entry: Entry;
+  t: (k: any) => string;
+  onConfirmReturn: () => void;
+  onDenyReturn: () => void;
+  onRequestDelete: () => void;
+}) {
   const isReturned = entry.status === "returned";
+  const isReturnPending = entry.status === "return_pending";
+  const isPending = entry.status === "pending";
+
+  const borderColor = isReturned ? colors.success : isReturnPending ? colors.warning : colors.danger;
+  const bg = isReturned
+    ? "rgba(220, 252, 231, 0.35)"
+    : isReturnPending
+    ? "rgba(254, 243, 199, 0.4)"
+    : "rgba(254, 226, 226, 0.35)";
+  const badgeBg = isReturned ? colors.success : isReturnPending ? "#B45309" : colors.danger;
+  const badgeText = isReturned ? t("returned") : isReturnPending ? "Awaiting your confirm" : t("pending");
+
   return (
     <View
-      style={[
-        styles.entryCard,
-        {
-          borderLeftColor: isReturned ? colors.success : colors.danger,
-          backgroundColor: isReturned ? "rgba(220, 252, 231, 0.35)" : "rgba(254, 226, 226, 0.35)",
-        },
-      ]}
+      style={[styles.entryCard, { borderLeftColor: borderColor, backgroundColor: bg }]}
       testID={`record-${entry.id}`}
     >
       <View style={styles.entryHeader}>
@@ -231,44 +268,83 @@ function EntryCard({ entry, t }: { entry: Entry; t: (k: any) => string }) {
             {entry.total_quantity} {t("pieces")} • {entry.items.length} {t("items")}
           </Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: isReturned ? colors.success : colors.danger }]}>
+        <View style={[styles.statusBadge, { backgroundColor: badgeBg }]}>
           <Ionicons
-            name={isReturned ? "checkmark-circle" : "time"}
+            name={isReturned ? "checkmark-circle" : isReturnPending ? "help-circle" : "time"}
             size={12}
             color={colors.textInverse}
           />
-          <Text style={styles.statusText}>
-            {isReturned ? t("returned") : t("pending")}
-          </Text>
+          <Text style={styles.statusText}>{badgeText}</Text>
         </View>
       </View>
 
       <View style={styles.itemsList}>
         {entry.items.map((it, i) => (
           <View key={i} style={styles.itemPill}>
-            <Text style={styles.itemPillText}>
-              {it.cloth_type} × {it.quantity}
-            </Text>
+            <Text style={styles.itemPillText}>{it.cloth_type} × {it.quantity}</Text>
             <Text style={styles.itemPillRate}>@ {formatINR(it.rate)}</Text>
           </View>
         ))}
       </View>
 
-      <View style={styles.entryFooter}>
-        <View style={{ flex: 1 }}>
-          {isReturned && entry.date_returned ? (
-            <Text style={styles.returnedLine}>
-              {t("returned_on")} {formatDate(entry.date_returned)}
-            </Text>
-          ) : (
-            <Text style={[styles.returnedLine, { color: colors.danger }]}>
-              Not received yet
-            </Text>
-          )}
-          {entry.notes ? <Text style={styles.notes}>{entry.notes}</Text> : null}
+      {entry.notes ? <Text style={styles.notes}>{entry.notes}</Text> : null}
+
+      {/* Action buttons */}
+      {isReturnPending ? (
+        <View style={styles.actionRow}>
+          <Text style={styles.actionPrompt}>Iron Man says they returned this. Did you receive it?</Text>
+          <View style={styles.actionBtns}>
+            <TouchableOpacity
+              testID={`deny-return-${entry.id}`}
+              style={[styles.actionBtn, { backgroundColor: colors.dangerLight }]}
+              onPress={onDenyReturn}
+            >
+              <Ionicons name="close" size={14} color={colors.danger} />
+              <Text style={[styles.actionBtnText, { color: colors.danger }]}>Not received</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID={`confirm-return-${entry.id}`}
+              style={[styles.actionBtn, { backgroundColor: colors.success }]}
+              onPress={onConfirmReturn}
+            >
+              <Ionicons name="checkmark" size={14} color={colors.textInverse} />
+              <Text style={[styles.actionBtnText, { color: colors.textInverse }]}>Yes, received</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
-      </View>
+      ) : null}
+
+      {isPending && !entry.delete_requested_at ? (
+        <View style={styles.entryFooter}>
+          <Text style={[styles.returnedLine, { color: colors.danger }]}>Not received yet</Text>
+          <TouchableOpacity
+            testID={`request-delete-${entry.id}`}
+            style={styles.deleteRequestBtn}
+            onPress={onRequestDelete}
+          >
+            <Ionicons name="trash-outline" size={12} color={colors.textMuted} />
+            <Text style={styles.deleteRequestText}>Request delete</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {entry.delete_requested_at ? (
+        <View style={styles.pendingNote}>
+          <Ionicons name="hourglass-outline" size={12} color={colors.warning} />
+          <Text style={styles.pendingNoteText}>Deletion requested — awaiting iron-man</Text>
+        </View>
+      ) : null}
+
+      {isReturned && entry.date_returned ? (
+        <View style={styles.entryFooter}>
+          <Text style={styles.returnedLine}>{t("returned_on")} {formatDate(entry.date_returned)}</Text>
+          <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
+        </View>
+      ) : (
+        <View style={[styles.entryFooter, { justifyContent: "flex-end" }]}>
+          <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -356,6 +432,21 @@ const styles = StyleSheet.create({
 
   entryFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
   returnedLine: { fontSize: 11, color: colors.success, fontWeight: "600" },
-  notes: { fontSize: 11, color: colors.textMuted, fontStyle: "italic", marginTop: 2 },
+  notes: { fontSize: 11, color: colors.textMuted, fontStyle: "italic", marginTop: 6 },
   entryAmount: { fontSize: 18, fontWeight: "800", color: colors.primary },
+
+  actionRow: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.borderLight },
+  actionPrompt: { fontSize: 12, color: colors.text, fontWeight: "600", marginBottom: spacing.sm, textAlign: "center" },
+  actionBtns: { flexDirection: "row", gap: 8 },
+  actionBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4,
+    paddingVertical: 10, borderRadius: radius.md,
+  },
+  actionBtnText: { fontSize: 12, fontWeight: "700" },
+
+  deleteRequestBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border },
+  deleteRequestText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
+
+  pendingNote: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.warningLight, borderRadius: radius.md, alignSelf: "flex-start" },
+  pendingNoteText: { fontSize: 11, color: colors.warning, fontWeight: "600" },
 });

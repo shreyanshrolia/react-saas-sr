@@ -128,6 +128,18 @@ class EntryMarkReturnedReq(BaseModel):
     date_returned: Optional[str] = None
 
 
+class NotificationPublic(BaseModel):
+    id: str
+    type: str
+    title: str
+    message: str
+    entry_id: Optional[str] = None
+    client_id: Optional[str] = None
+    iron_man_id: Optional[str] = None
+    read: bool
+    created_at: str
+
+
 class EntryPublic(BaseModel):
     id: str
     iron_man_id: str
@@ -140,7 +152,10 @@ class EntryPublic(BaseModel):
     total_quantity: int
     total_amount: float
     notes: Optional[str] = None
-    status: str  # pending | returned
+    status: str  # pending | return_pending | returned
+    linked_user_id: Optional[str] = None
+    return_requested_at: Optional[str] = None
+    delete_requested_at: Optional[str] = None
     created_at: str
 
 
@@ -336,14 +351,31 @@ async def me(user=Depends(get_current_user)):
 
 
 async def _refresh_subscription(user: dict):
-    ends = user.get("subscription_ends_at")
-    if not ends:
-        return
-    if parse_iso(ends) < now_utc() and user.get("subscription_status") in ("trial", "active"):
+    """Derive current subscription status from trial_ends_at and subscription_ends_at.
+    - 'trial'   = trial period still active (regardless of payment)
+    - 'active'  = paid period active, trial has ended
+    - 'expired' = both ended
+    Paying during trial extends subscription_ends_at past trial_ends_at so user
+    gets BOTH the remaining trial days AND the full paid period.
+    """
+    now = now_utc()
+    sub_end_iso = user.get("subscription_ends_at")
+    trial_end_iso = user.get("trial_ends_at")
+    sub_end = parse_iso(sub_end_iso) if sub_end_iso else None
+    trial_end = parse_iso(trial_end_iso) if trial_end_iso else None
+
+    new_status = "expired"
+    if sub_end and sub_end > now:
+        if trial_end and trial_end > now:
+            new_status = "trial"
+        else:
+            new_status = "active"
+
+    if user.get("subscription_status") != new_status:
         await db.users.update_one(
-            {"_id": user["_id"]}, {"$set": {"subscription_status": "expired"}}
+            {"_id": user["_id"]}, {"$set": {"subscription_status": new_status}}
         )
-        user["subscription_status"] = "expired"
+        user["subscription_status"] = new_status
 
 
 # ---------- Clients (Iron Man only) ----------
@@ -478,8 +510,48 @@ def to_entry_public(e: dict) -> EntryPublic:
         total_amount=e["total_amount"],
         notes=e.get("notes"),
         status=e["status"],
+        linked_user_id=e.get("linked_user_id"),
+        return_requested_at=e.get("return_requested_at"),
+        delete_requested_at=e.get("delete_requested_at"),
         created_at=e["created_at"],
     )
+
+
+# ---------- Notifications ----------
+async def _create_notification(
+    user_id: str,
+    type_: str,
+    title: str,
+    message: str,
+    entry_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    iron_man_id: Optional[str] = None,
+) -> None:
+    if not user_id:
+        return
+    nid = str(uuid.uuid4())
+    await db.notifications.insert_one({
+        "_id": nid,
+        "user_id": user_id,
+        "type": type_,
+        "title": title,
+        "message": message,
+        "entry_id": entry_id,
+        "client_id": client_id,
+        "iron_man_id": iron_man_id,
+        "read": False,
+        "created_at": iso(now_utc()),
+    })
+
+
+def _items_summary(items: list) -> str:
+    parts = []
+    for it in items[:3]:
+        parts.append(f"{it.get('cloth_type', '')}×{it.get('quantity', 0)}")
+    extra = len(items) - 3
+    if extra > 0:
+        parts.append(f"+{extra} more")
+    return ", ".join(parts)
 
 
 @api.post("/entries", response_model=EntryPublic)
@@ -505,10 +577,23 @@ async def create_entry(req: EntryCreateReq, user=Depends(get_current_user)):
         "total_amount": amt,
         "notes": req.notes,
         "status": "pending",
+        "return_requested_at": None,
+        "delete_requested_at": None,
         "month_key": month_key(given_dt),
         "created_at": iso(now_utc()),
     }
     await db.entries.insert_one(doc)
+    # Notify the client (if signed up)
+    if c.get("linked_user_id"):
+        await _create_notification(
+            user_id=c["linked_user_id"],
+            type_="new_entry",
+            title="New clothes added",
+            message=f"{user['name']} added {qty} pcs ({_items_summary([i.dict() for i in req.items])}) on {iso(given_dt)[:10]}",
+            entry_id=eid,
+            iron_man_id=user["_id"],
+            client_id=c["_id"],
+        )
     return to_entry_public(doc)
 
 
@@ -525,9 +610,8 @@ async def list_entries(
         if client_id:
             q["client_id"] = client_id
     else:
-        # client sees only their own entries (linked)
         q["linked_user_id"] = user["_id"]
-    if status_filter in ("pending", "returned"):
+    if status_filter in ("pending", "return_pending", "returned"):
         q["status"] = status_filter
     if month:
         q["month_key"] = month
@@ -539,26 +623,229 @@ async def list_entries(
 
 @api.post("/entries/{entry_id}/return", response_model=EntryPublic)
 async def mark_returned(entry_id: str, req: EntryMarkReturnedReq, user=Depends(get_current_user)):
+    """Iron man marks entry as returned. If the client is signed up (linked_user_id),
+    transitions to 'return_pending' and creates a notification for the client to confirm.
+    If unlinked, transitions directly to 'returned'."""
     require_iron(user)
     e = await db.entries.find_one({"_id": entry_id, "iron_man_id": user["_id"]})
     if not e:
         raise HTTPException(status_code=404, detail="Entry not found")
-    ret_dt = parse_iso(req.date_returned) if req.date_returned else now_utc()
+    if e["status"] == "returned":
+        return to_entry_public(e)
+    now = iso(now_utc())
+    if e.get("linked_user_id"):
+        await db.entries.update_one(
+            {"_id": entry_id},
+            {"$set": {"status": "return_pending", "return_requested_at": now}},
+        )
+        await _create_notification(
+            user_id=e["linked_user_id"],
+            type_="return_requested",
+            title="Iron Man returned your clothes",
+            message=f"{user['name']} says they returned your clothes ({e['total_quantity']} pcs). Please confirm.",
+            entry_id=entry_id,
+            iron_man_id=user["_id"],
+            client_id=e["client_id"],
+        )
+    else:
+        ret_dt = parse_iso(req.date_returned) if req.date_returned else now_utc()
+        await db.entries.update_one(
+            {"_id": entry_id},
+            {"$set": {"status": "returned", "date_returned": iso(ret_dt), "return_requested_at": None}},
+        )
+    return to_entry_public(await db.entries.find_one({"_id": entry_id}))
+
+
+@api.post("/entries/{entry_id}/return/confirm", response_model=EntryPublic)
+async def confirm_return(entry_id: str, user=Depends(get_current_user)):
+    """Client confirms the iron-man's return claim."""
+    require_client(user)
+    e = await db.entries.find_one({"_id": entry_id, "linked_user_id": user["_id"]})
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if e["status"] != "return_pending":
+        raise HTTPException(status_code=400, detail="Entry not awaiting confirmation")
+    now = iso(now_utc())
     await db.entries.update_one(
         {"_id": entry_id},
-        {"$set": {"status": "returned", "date_returned": iso(ret_dt)}},
+        {"$set": {"status": "returned", "date_returned": now, "return_requested_at": None}},
     )
-    e2 = await db.entries.find_one({"_id": entry_id})
-    return to_entry_public(e2)
+    await _create_notification(
+        user_id=e["iron_man_id"],
+        type_="return_confirmed",
+        title="Return confirmed",
+        message=f"{user['name']} confirmed receipt of {e['total_quantity']} pcs.",
+        entry_id=entry_id,
+        iron_man_id=e["iron_man_id"],
+        client_id=e["client_id"],
+    )
+    return to_entry_public(await db.entries.find_one({"_id": entry_id}))
+
+
+@api.post("/entries/{entry_id}/return/deny", response_model=EntryPublic)
+async def deny_return(entry_id: str, user=Depends(get_current_user)):
+    """Client denies the iron-man's return claim."""
+    require_client(user)
+    e = await db.entries.find_one({"_id": entry_id, "linked_user_id": user["_id"]})
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if e["status"] != "return_pending":
+        raise HTTPException(status_code=400, detail="Entry not awaiting confirmation")
+    await db.entries.update_one(
+        {"_id": entry_id},
+        {"$set": {"status": "pending", "return_requested_at": None}},
+    )
+    await _create_notification(
+        user_id=e["iron_man_id"],
+        type_="return_denied",
+        title="Return rejected",
+        message=f"{user['name']} did NOT receive the clothes yet.",
+        entry_id=entry_id,
+        iron_man_id=e["iron_man_id"],
+        client_id=e["client_id"],
+    )
+    return to_entry_public(await db.entries.find_one({"_id": entry_id}))
+
+
+@api.post("/entries/{entry_id}/delete-request", response_model=EntryPublic)
+async def request_entry_delete(entry_id: str, user=Depends(get_current_user)):
+    """Client requests deletion of an entry. Iron man must confirm."""
+    require_client(user)
+    e = await db.entries.find_one({"_id": entry_id, "linked_user_id": user["_id"]})
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await db.entries.update_one(
+        {"_id": entry_id},
+        {"$set": {"delete_requested_at": iso(now_utc())}},
+    )
+    await _create_notification(
+        user_id=e["iron_man_id"],
+        type_="delete_requested",
+        title="Client wants to delete an entry",
+        message=f"{user['name']} requested deletion of an entry ({e['total_quantity']} pcs on {e['date_given'][:10]}).",
+        entry_id=entry_id,
+        iron_man_id=e["iron_man_id"],
+        client_id=e["client_id"],
+    )
+    return to_entry_public(await db.entries.find_one({"_id": entry_id}))
+
+
+@api.post("/entries/{entry_id}/delete-confirm")
+async def confirm_entry_delete(entry_id: str, user=Depends(get_current_user)):
+    """Iron man confirms deletion."""
+    require_iron(user)
+    e = await db.entries.find_one({"_id": entry_id, "iron_man_id": user["_id"]})
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if not e.get("delete_requested_at"):
+        raise HTTPException(status_code=400, detail="No delete request pending")
+    await db.entries.delete_one({"_id": entry_id})
+    if e.get("linked_user_id"):
+        await _create_notification(
+            user_id=e["linked_user_id"],
+            type_="delete_confirmed",
+            title="Entry deleted",
+            message=f"Your entry for {e['total_quantity']} pcs on {e['date_given'][:10]} was deleted.",
+            entry_id=None,
+            iron_man_id=e["iron_man_id"],
+            client_id=e["client_id"],
+        )
+    return {"ok": True}
+
+
+@api.post("/entries/{entry_id}/delete-deny", response_model=EntryPublic)
+async def deny_entry_delete(entry_id: str, user=Depends(get_current_user)):
+    """Iron man denies the client's deletion request."""
+    require_iron(user)
+    e = await db.entries.find_one({"_id": entry_id, "iron_man_id": user["_id"]})
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if not e.get("delete_requested_at"):
+        raise HTTPException(status_code=400, detail="No delete request pending")
+    await db.entries.update_one(
+        {"_id": entry_id}, {"$set": {"delete_requested_at": None}}
+    )
+    if e.get("linked_user_id"):
+        await _create_notification(
+            user_id=e["linked_user_id"],
+            type_="delete_denied",
+            title="Deletion rejected",
+            message=f"{user['name']} did not approve deletion of your entry from {e['date_given'][:10]}.",
+            entry_id=entry_id,
+            iron_man_id=e["iron_man_id"],
+            client_id=e["client_id"],
+        )
+    return to_entry_public(await db.entries.find_one({"_id": entry_id}))
 
 
 @api.delete("/entries/{entry_id}")
 async def delete_entry(entry_id: str, user=Depends(get_current_user)):
+    """Hard-delete an entry. Only allowed for iron-man IF the client is not signed up.
+    For signed-up clients, the client must request deletion via /delete-request and
+    the iron-man must confirm via /delete-confirm."""
     require_iron(user)
-    res = await db.entries.delete_one({"_id": entry_id, "iron_man_id": user["_id"]})
-    if res.deleted_count == 0:
+    e = await db.entries.find_one({"_id": entry_id, "iron_man_id": user["_id"]})
+    if not e:
         raise HTTPException(status_code=404, detail="Entry not found")
+    if e.get("linked_user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Client is signed up. Ask the client to request deletion.",
+        )
+    await db.entries.delete_one({"_id": entry_id})
     return {"ok": True}
+
+
+# ---------- Notifications endpoints ----------
+def _to_notification(n: dict) -> NotificationPublic:
+    return NotificationPublic(
+        id=n["_id"],
+        type=n["type"],
+        title=n["title"],
+        message=n["message"],
+        entry_id=n.get("entry_id"),
+        client_id=n.get("client_id"),
+        iron_man_id=n.get("iron_man_id"),
+        read=bool(n.get("read", False)),
+        created_at=n["created_at"],
+    )
+
+
+@api.get("/notifications", response_model=List[NotificationPublic])
+async def list_notifications(unread_only: bool = False, user=Depends(get_current_user)):
+    q: dict = {"user_id": user["_id"]}
+    if unread_only:
+        q["read"] = False
+    out: List[NotificationPublic] = []
+    async for n in db.notifications.find(q).sort("created_at", -1).limit(100):
+        out.append(_to_notification(n))
+    return out
+
+
+@api.get("/notifications/unread-count")
+async def unread_count(user=Depends(get_current_user)):
+    n = await db.notifications.count_documents({"user_id": user["_id"], "read": False})
+    return {"count": n}
+
+
+@api.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, user=Depends(get_current_user)):
+    res = await db.notifications.update_one(
+        {"_id": notification_id, "user_id": user["_id"]},
+        {"$set": {"read": True}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"ok": True}
+
+
+@api.post("/notifications/read-all")
+async def mark_all_notifications_read(user=Depends(get_current_user)):
+    res = await db.notifications.update_many(
+        {"user_id": user["_id"], "read": False},
+        {"$set": {"read": True}},
+    )
+    return {"updated": res.modified_count}
 
 
 # ---------- Bills ----------
@@ -1187,6 +1474,7 @@ async def startup():
     await db.bills.create_index("linked_user_id")
     await db.payments.create_index("bill_id")
     await db.payments.create_index("iron_man_id")
+    await db.notifications.create_index([("user_id", 1), ("read", 1), ("created_at", -1)])
     log.info("Grihkari API started")
 
 

@@ -23,6 +23,7 @@ import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
 import { formatINR } from "@/src/utils/format";
 import Toast from "@/src/components/Toast";
+import NotificationBell from "@/src/components/NotificationBell";
 
 export default function ClientsScreen() {
   const { t } = useI18n();
@@ -57,14 +58,17 @@ export default function ClientsScreen() {
           <Text style={styles.title}>{t("your_clients")}</Text>
           <Text style={styles.subtitle}>{clients.length} {clients.length === 1 ? "client" : "clients"}</Text>
         </View>
-        <TouchableOpacity
-          testID="open-add-client-button"
-          style={styles.addBtn}
-          onPress={() => setShowAdd(true)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="add" size={24} color={colors.textInverse} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <NotificationBell />
+          <TouchableOpacity
+            testID="open-add-client-button"
+            style={styles.addBtn}
+            onPress={() => setShowAdd(true)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="add" size={24} color={colors.textInverse} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (

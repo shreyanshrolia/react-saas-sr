@@ -93,7 +93,29 @@ export interface Entry {
   total_quantity: number;
   total_amount: number;
   notes?: string | null;
-  status: "pending" | "returned";
+  status: "pending" | "return_pending" | "returned";
+  linked_user_id?: string | null;
+  return_requested_at?: string | null;
+  delete_requested_at?: string | null;
+  created_at: string;
+}
+
+export interface Notification {
+  id: string;
+  type:
+    | "new_entry"
+    | "return_requested"
+    | "return_confirmed"
+    | "return_denied"
+    | "delete_requested"
+    | "delete_confirmed"
+    | "delete_denied";
+  title: string;
+  message: string;
+  entry_id?: string | null;
+  client_id?: string | null;
+  iron_man_id?: string | null;
+  read: boolean;
   created_at: string;
 }
 

@@ -352,7 +352,9 @@ class TestLinkedUserPropagation:
             assert r.status_code == 200
             still = [e for e in r.json() if e["id"] == entry_id]
             assert len(still) == 1
-            assert still[0]["status"] == "returned"
+            # Iteration-5: linked-client return goes to 'return_pending' first.
+            # Client must confirm to mark 'returned'.
+            assert still[0]["status"] == "return_pending"
         finally:
             if entry_id:
                 requests.delete(f"{BASE_URL}/api/entries/{entry_id}",

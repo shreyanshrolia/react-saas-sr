@@ -176,8 +176,9 @@ class TestVerifyPayment:
         assert user["subscription_ends_at"]
         ends = datetime.fromisoformat(user["subscription_ends_at"].replace("Z", "+00:00"))
         delta_days = (ends - datetime.now(timezone.utc)).days
-        # Should be ~30 days from now
-        assert 28 <= delta_days <= 31, f"expected ~30 days, got {delta_days}"
+        # Iteration-5 trial-stacking: paying mid-trial extends from trial_end (~45d) + 30d ≈ 75d
+        # _reset_user_sub sets trial_end = now + 45d, so total should be ~74-75 days.
+        assert 72 <= delta_days <= 76, f"expected ~75 days (trial+30), got {delta_days}"
         # Audit: order is paid
         order_doc = mongo_db.subscription_orders.find_one({"_id": order_id})
         assert order_doc["status"] == "paid"

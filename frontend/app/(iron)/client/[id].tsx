@@ -58,6 +58,26 @@ export default function ClientDetail() {
     }
   };
 
+  const confirmDelete = async (entryId: string) => {
+    try {
+      await api.post(`/entries/${entryId}/delete-confirm`);
+      setEntries((cur) => cur.filter((e) => e.id !== entryId));
+      setToast({ msg: "Entry deleted", variant: "success" });
+    } catch (e: any) {
+      setToast({ msg: e?.message || "Failed", variant: "error" });
+    }
+  };
+
+  const denyDelete = async (entryId: string) => {
+    try {
+      const updated = await api.post<Entry>(`/entries/${entryId}/delete-deny`);
+      setEntries((cur) => cur.map((e) => (e.id === entryId ? updated : e)));
+      setToast({ msg: "Deletion rejected", variant: "success" });
+    } catch (e: any) {
+      setToast({ msg: e?.message || "Failed", variant: "error" });
+    }
+  };
+
   const filtered = entries.filter((e) => (filter === "all" ? true : e.status === filter));
 
   if (loading) {
@@ -156,16 +176,45 @@ export default function ClientDetail() {
                       <Ionicons name="checkmark-circle" size={16} color={colors.success} />
                       <Text style={styles.markBtnText}>{t("mark_returned")}</Text>
                     </TouchableOpacity>
+                  ) : e.status === "return_pending" ? (
+                    <View style={[styles.returnedBadge, { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }]}>
+                      <Ionicons name="hourglass-outline" size={14} color={colors.warning} />
+                      <Text style={[styles.returnedText, { color: colors.warning }]}>Awaiting client confirm</Text>
+                    </View>
                   ) : (
                     <View style={styles.returnedBadge}>
                       <Ionicons name="checkmark-circle" size={14} color={colors.success} />
                       <Text style={styles.returnedText}>{t("returned_on")} {formatDate(e.date_returned)}</Text>
                     </View>
                   )}
-                  <TouchableOpacity testID={`delete-entry-${e.id}`} style={styles.deleteBtn} onPress={() => deleteEntry(e.id)}>
-                    <Ionicons name="trash-outline" size={16} color={colors.danger} />
-                  </TouchableOpacity>
+                  {!e.linked_user_id ? (
+                    <TouchableOpacity testID={`delete-entry-${e.id}`} style={styles.deleteBtn} onPress={() => deleteEntry(e.id)}>
+                      <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
+                {e.delete_requested_at ? (
+                  <View style={styles.deleteReqBanner}>
+                    <Ionicons name="alert-circle" size={14} color={colors.warning} />
+                    <Text style={styles.deleteReqText}>Client wants to delete this entry</Text>
+                    <View style={{ flexDirection: "row", gap: 6, marginLeft: "auto" }}>
+                      <TouchableOpacity
+                        testID={`deny-delete-${e.id}`}
+                        style={[styles.deleteReqBtn, { backgroundColor: colors.bgSecondary }]}
+                        onPress={() => denyDelete(e.id)}
+                      >
+                        <Text style={[styles.deleteReqBtnText, { color: colors.text }]}>Deny</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        testID={`confirm-delete-${e.id}`}
+                        style={[styles.deleteReqBtn, { backgroundColor: colors.danger }]}
+                        onPress={() => confirmDelete(e.id)}
+                      >
+                        <Text style={[styles.deleteReqBtnText, { color: colors.textInverse }]}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : null}
               </View>
             ))}
           </View>
@@ -249,4 +298,12 @@ const styles = StyleSheet.create({
   returnedBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
   returnedText: { fontSize: 11, color: colors.success, fontWeight: "600" },
   deleteBtn: { padding: 6 },
+  deleteReqBanner: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginTop: spacing.md, paddingHorizontal: 10, paddingVertical: 8,
+    backgroundColor: colors.warningLight, borderRadius: radius.md,
+  },
+  deleteReqText: { fontSize: 11, color: colors.warning, fontWeight: "700", flexShrink: 1 },
+  deleteReqBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
+  deleteReqBtnText: { fontSize: 11, fontWeight: "700" },
 });
