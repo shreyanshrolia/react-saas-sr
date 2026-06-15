@@ -74,9 +74,14 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.brandWrap}>
-            <View style={styles.logo}>
+            <Pressable
+              testID="admin-entry"
+              onLongPress={() => router.push("/(admin)/login")}
+              delayLongPress={1200}
+              style={styles.logo}
+            >
               <Ionicons name="shirt" size={36} color={colors.textInverse} />
-            </View>
+            </Pressable>
             <Text style={styles.brand}>{t("app_name")}</Text>
             <Text style={styles.tagline}>{t("tagline")}</Text>
           </View>
@@ -136,6 +141,14 @@ export default function LoginScreen() {
             ) : (
               <Text style={styles.primaryBtnText}>{t("login")}</Text>
             )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="forgot-password-link"
+            onPress={() => router.push("/(auth)/forgot-password")}
+            style={{ alignItems: "center", marginTop: spacing.md }}
+          >
+            <Text style={[styles.switchLink, { fontSize: 13 }]}>Forgot password?</Text>
           </TouchableOpacity>
 
           <View style={styles.switchRow}>

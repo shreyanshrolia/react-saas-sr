@@ -13,7 +13,7 @@ import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
-import { api, type Bill, type Entry, type IronManLink } from "@/src/api/client";
+import { api, type Bill, type Entry, type IronManLink, type Notification } from "@/src/api/client";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
@@ -32,19 +32,22 @@ export default function ClientHome() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
 
+  const [pendingDeleteReq, setPendingDeleteReq] = useState<Notification | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [im, en, bi] = await Promise.all([
+      const [im, en, bi, notifs] = await Promise.all([
         api.get<IronManLink[]>("/my/iron-men"),
         api.get<Entry[]>("/entries"),
         api.get<Bill[]>("/bills"),
+        api.get<Notification[]>("/notifications?unread_only=true"),
       ]);
       setIronMen(im);
       setEntries(en);
       setBills(bi);
-    } catch {
-      // ignore
-    } finally {
+      const pendingDel = notifs.find((n) => n.type === "client_delete_requested");
+      setPendingDeleteReq(pendingDel || null);
+    } catch {/* ignore */} finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -92,6 +95,38 @@ export default function ClientHome() {
           <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>
         ) : (
           <>
+            {pendingDeleteReq ? (
+              <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.lg, backgroundColor: colors.dangerLight, borderRadius: radius.lg, borderWidth: 2, borderColor: colors.danger }} testID="client-delete-banner">
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <Ionicons name="alert-circle" size={20} color={colors.danger} />
+                  <Text style={{ fontSize: 14, fontWeight: "800", color: colors.danger, flex: 1 }}>Removal request from Iron Man</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: colors.text, marginBottom: spacing.md }}>{pendingDeleteReq.message}</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TouchableOpacity
+                    testID="banner-deny-delete"
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: radius.md, backgroundColor: colors.card, alignItems: "center", borderWidth: 1, borderColor: colors.border }}
+                    onPress={async () => {
+                      if (!pendingDeleteReq.client_id) return;
+                      try { await api.post(`/clients/${pendingDeleteReq.client_id}/delete-deny`); await api.post(`/notifications/${pendingDeleteReq.id}/read`); load(); } catch {/* ignore */}
+                    }}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: "700", fontSize: 13 }}>Keep relationship</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID="banner-confirm-delete"
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: radius.md, backgroundColor: colors.danger, alignItems: "center" }}
+                    onPress={async () => {
+                      if (!pendingDeleteReq.client_id) return;
+                      try { await api.post(`/clients/${pendingDeleteReq.client_id}/delete-confirm`); await api.post(`/notifications/${pendingDeleteReq.id}/read`); load(); } catch {/* ignore */}
+                    }}
+                  >
+                    <Text style={{ color: colors.textInverse, fontWeight: "700", fontSize: 13 }}>Delete my records</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.heroCard} testID="client-month-card">
               <Text style={styles.heroLabel}>{t("this_month")}</Text>
               <Text style={styles.heroAmount}>{formatINR(monthAmount)}</Text>
@@ -128,7 +163,7 @@ export default function ClientHome() {
                     onPress={() => Linking.openURL(`tel:${im.iron_man_phone}`)}
                   >
                     <View style={styles.imAvatar}>
-                      <Ionicons name="hammer" size={20} color={colors.primary} />
+                      <Ionicons name="shirt" size={20} color={colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.imName}>{im.iron_man_name}</Text>

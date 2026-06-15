@@ -101,3 +101,60 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Build mobile app Grihkari for managing daily clothes ironing business with Iron Man (vendor) and Client roles. User requested admin panel UI to reset passwords for users who call the helpline."
+
+frontend:
+  - task: "Admin Panel UI - Login screen"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(admin)/login.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Created admin login screen at /(admin)/login that posts to POST /api/admin/login and stores token via storage.secureSet under key grihkari_admin_token. Auto-redirects to dashboard if already logged in. Entry point: long-press (1.2s) on the shirt logo on /(auth)/login navigates to admin login."
+
+  - task: "Admin Panel UI - Dashboard (list + search + reset password)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(admin)/dashboard.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Dashboard lists users via GET /api/admin/users?admin_token=... with debounced search by name/phone. Each user row has a Reset button that opens a modal to enter (or auto-generate) a new password, posting to POST /api/admin/users/{user_id}/reset-password. Success modal shows credentials to share. 401 responses clear admin token and route back to admin login. Sign-out clears the admin token."
+
+  - task: "Admin API client (frontend)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/api/admin.ts"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added adminApi with login/listUsers/resetPassword. Stores token separately from user JWT in SecureStore. Attaches admin_token as query param per backend contract."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 6
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "Admin Panel UI - Login screen"
+    - "Admin Panel UI - Dashboard (list + search + reset password)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Built the missing Admin Panel frontend. Routes: /(admin)/login and /(admin)/dashboard. Backend admin endpoints already exist and were verified in prior iterations. Please test: (1) navigate to /(admin)/login, sign in with admin password 'grihkari-admin-2026' (it should accept and route to dashboard), (2) on dashboard verify the list loads, search by phone like '9999999991' filters results, (3) tap Reset for any user, enter a new password (min 6 chars) or use auto-generate, submit, expect success modal with credentials, (4) verify the user can then log in via /(auth)/login with the new password, (5) wrong admin password shows error, (6) sign out clears token and routes back to /(admin)/login. Frontend-only testing requested. Admin credential is in /app/memory/test_credentials.md."

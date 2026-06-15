@@ -1,0 +1,55 @@
+{
+  "summary": "Frontend testing of newly-built Admin Panel for Grihkari. 8 of 9 scenarios PASS. Scenario 7 (logout via Alert.alert) FAILS on web because react-native-web's Alert.alert does not invoke multi-button callbacks reliably — clicking admin-logout shows no confirmation dialog and never clears the admin token or navigates back to /(admin)/login. All other flows (direct nav to admin login, wrong/correct password auth, dashboard listing, debounced search + clear, reset modal with min-6 inline error, secure password generator producing 8-char value, success modal with name/phone/password, Done dismiss, actual client login with newly generated password redirecting to /(client)/home, password restoration back to test123, and long-press shirt logo discreet admin entry with delayLongPress=1200) all worked correctly. Test users restored: client 9999999992 password reset back to test123 and verified via /api/auth/login (200 OK).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AdminDashboardScreen logout",
+        "issue": "Tapping admin-logout fires Alert.alert with two buttons (Cancel / Sign out). On react-native-web the multi-button onPress callback never runs, so clearAdminToken() and router.replace('/(admin)/login') never fire. URL stays on /dashboard and admin-password-input is never rendered. Verified twice, including with window.confirm = () => true mock. Affects only the web preview; native should be fine. Replace Alert.alert with a custom <Modal> confirmation OR branch on Platform.OS === 'web' to use window.confirm directly. Reference: /app/frontend/app/(admin)/dashboard.tsx:123-135",
+        "testID": "admin-logout",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "(admin)/login & (admin)/dashboard",
+        "issues": [
+          "Console deprecation warnings: 'shadow*' style props are deprecated (use boxShadow). Appears on admin login logo + primaryBtn shadows. Non-blocking but should migrate. Reference: /app/frontend/app/(admin)/login.tsx:168-172, primaryBtn shadow."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {
+        "component": "Alert.alert (react-native-web)",
+        "issue": "Multi-button Alert.alert callbacks are not fired on web preview, breaking the admin logout flow. Use a custom <Modal> for confirmations or Platform.OS branch with window.confirm. Reference: /app/frontend/app/(admin)/dashboard.tsx:123-135"
+      },
+      {
+        "component": "Route conflict: /(auth)/login and /(admin)/login",
+        "issue": "Both files compile to the same URL path /login under expo-router. Direct browser nav to either group works, but in-app router.push('/(admin)/login') and router.push('/(auth)/login') rely on group disambiguation. Verified long-press path works, but worth noting in case future group-less navigation lands on the wrong screen. Reference: /app/frontend/app/(admin)/login.tsx, /app/frontend/app/(auth)/login.tsx"
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_6.json"
+  ],
+  "action_items": [
+    "Replace Alert.alert in /app/frontend/app/(admin)/dashboard.tsx logout() with a custom React Native <Modal> confirmation (consistent with the existing reset/success modals) OR use Platform.OS === 'web' branch invoking window.confirm. Without this, helpline operators cannot sign out via web preview.",
+    "Optional: migrate deprecated `shadow*` style props to `boxShadow` in admin login + dashboard styles to silence console warnings.",
+    "Optional: be aware that /(admin)/login and /(auth)/login share the URL /login; if you ever add deep linking, prefix one route or rename to avoid ambiguity."
+  ],
+  "critical_code_review_comments": [
+    "admin.ts adminRequest correctly forwards admin token as query string and handles 401 by clearing token + redirecting; good.",
+    "dashboard.tsx debounced search (300ms) and pull-to-refresh work as expected.",
+    "Reset password validation client-side: enforces min 6 chars before hitting backend; success payload computed before closeReset() to avoid race — clean.",
+    "Generated password uses 31-char alphabet, length 8 ⇒ ~40 bits entropy; fine for helpline temp passwords.",
+    "useEffect in admin login auto-redirects to dashboard if token already cached — good UX but means logging out must reliably clear the token; current logout bug compounds this on web."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped (per request)", "frontend": "88% (8/9 scenarios pass)"},
+  "seed_data_creation": "No new seed data. Verified existing test users (9999999991 iron_man, 9999999992 client) intact. Reset client password to a generated value, verified login works, then restored to test123 via admin panel and re-verified via /api/auth/login (200 OK). /app/memory/test_credentials.md unchanged.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Admin panel mostly works. Only failing flow is the logout button due to Alert.alert behavior on react-native-web. After E1 fixes logout, retest scenarios 7 and 8 (sign out + re-login after sign out). Admin token is stored via secureStore wrapper (localStorage on web) under key 'grihkari_admin_token'. Backend admin token format: 'admin:<password>' i.e. 'admin:grihkari-admin-2026'.",
+  "rca_of_issue": "Issue: admin-logout button does not sign user out on web. RCA: dashboard.tsx logout() calls Alert.alert('Sign out?', '...', [{text:'Cancel', style:'cancel'}, {text:'Sign out', style:'destructive', onPress: async () => { await clearAdminToken(); router.replace('/(admin)/login'); }}]). react-native-web's Alert.alert implementation does NOT call the destructive button's onPress callback for two-button alerts — it either no-ops or uses window.alert (single-message) which never triggers the second handler. Reproduction: log into admin, tap testID='admin-logout', observe URL stays at /dashboard and dashboard remains visible. Mitigation: (a) replace Alert.alert with a custom RN <Modal> (preferred — matches existing reset/success modals); (b) Platform.OS === 'web' branch using window.confirm(); (c) library like react-native-paper Dialog. Option (a) is the cleanest fix."
+}

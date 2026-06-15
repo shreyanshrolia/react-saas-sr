@@ -25,7 +25,7 @@ const TYPE_ICON: Record<Notification["type"], { icon: any; color: string }> = {
   delete_requested: { icon: "trash-bin", color: colors.warning },
   delete_confirmed: { icon: "trash", color: colors.danger },
   delete_denied: { icon: "shield-checkmark", color: colors.success },
-  client_delete_requested: { icon: "person-remove", color: colors.danger },
+  client_delete_requested: { icon: "shirt", color: colors.danger },
   client_delete_confirmed: { icon: "person-remove-outline", color: colors.danger },
   client_delete_denied: { icon: "shield-checkmark", color: colors.success },
 };

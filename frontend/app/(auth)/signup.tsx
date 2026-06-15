@@ -30,17 +30,33 @@ export default function SignupScreen() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [address, setAddress] = useState("");
+  const [securityQ, setSecurityQ] = useState("What is your favorite city?");
+  const [securityA, setSecurityA] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  const SECURITY_QS = [
+    "What is your mother's maiden name?",
+    "What was the name of your first school?",
+    "What is your favorite city?",
+    "What is your pet's name?",
+    "Who was your childhood best friend?",
+  ];
 
   const submit = async () => {
     setErr("");
     if (!name.trim()) return setErr(t("name"));
     if (phone.length !== 10) return setErr(t("phone_help"));
     if (password.length < 6) return setErr(t("password_help"));
+    if (!securityA.trim()) return setErr("Please answer the security question");
     setLoading(true);
     try {
-      const user = await signup({ name: name.trim(), phone, password, role, address: address.trim() || undefined });
+      const user = await signup({
+        name: name.trim(), phone, password, role,
+        address: address.trim() || undefined,
+        security_question: securityQ,
+        security_answer: securityA.trim(),
+      } as any);
       if (user.role === "iron_man") router.replace("/(iron)/clients");
       else router.replace("/(client)/home");
     } catch (e: any) {
@@ -153,6 +169,36 @@ export default function SignupScreen() {
               value={address}
               onChangeText={setAddress}
             />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Security Question (for password reset)</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {SECURITY_QS.map((q) => (
+                <TouchableOpacity
+                  key={q}
+                  testID={`sec-q-${q.slice(0, 10)}`}
+                  onPress={() => setSecurityQ(q)}
+                  style={{
+                    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999,
+                    backgroundColor: securityQ === q ? colors.primary : colors.card,
+                    borderWidth: 1, borderColor: securityQ === q ? colors.primary : colors.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: "600", color: securityQ === q ? colors.textInverse : colors.textSecondary }}>{q}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              testID="signup-security-answer-input"
+              style={[styles.input, { marginTop: 8 }]}
+              placeholder="Your answer (case-insensitive)"
+              placeholderTextColor={colors.textMuted}
+              value={securityA}
+              onChangeText={setSecurityA}
+              autoCapitalize="none"
+            />
+            <Text style={styles.help}>You'll need this to reset your password.</Text>
           </View>
 
           {err ? <Text style={styles.error}>{err}</Text> : null}

@@ -39,6 +39,15 @@ RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_ENABLED else None
 
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+SECURITY_QUESTIONS = [
+    "What is your mother's maiden name?",
+    "What was the name of your first school?",
+    "What is your favorite city?",
+    "What is your pet's name?",
+    "Who was your childhood best friend?",
+]
+
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
@@ -61,11 +70,31 @@ class SignupReq(BaseModel):
     password: str = Field(..., min_length=6, max_length=80)
     role: Role
     address: Optional[str] = Field(None, max_length=300)
+    security_question: str = Field(..., min_length=4, max_length=120)
+    security_answer: str = Field(..., min_length=2, max_length=80)
 
 
 class LoginReq(BaseModel):
     phone: str = Field(..., min_length=10, max_length=10, pattern=r"^\d{10}$")
     password: str
+
+
+class ForgotPasswordReq(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=10, pattern=r"^\d{10}$")
+
+
+class ResetPasswordReq(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=10, pattern=r"^\d{10}$")
+    security_answer: str = Field(..., min_length=1, max_length=80)
+    new_password: str = Field(..., min_length=6, max_length=80)
+
+
+class AdminLoginReq(BaseModel):
+    password: str
+
+
+class AdminResetReq(BaseModel):
+    new_password: str = Field(..., min_length=6, max_length=80)
 
 
 class UserPublic(BaseModel):
@@ -304,6 +333,8 @@ async def signup(req: SignupReq):
         "password_hash": hash_pw(req.password),
         "role": req.role,
         "address": req.address,
+        "security_question": req.security_question.strip(),
+        "security_answer_hash": hash_pw(req.security_answer.strip().lower()),
         "trial_ends_at": iso(trial_end),
         "subscription_status": "trial",
         "subscription_ends_at": iso(trial_end),
@@ -349,6 +380,89 @@ async def me(user=Depends(get_current_user)):
     await _refresh_subscription(user)
     fresh = await db.users.find_one({"_id": user["_id"]}, {"password_hash": 0})
     return to_user_public(fresh)
+
+
+@api.get("/auth/security-questions")
+async def security_questions():
+    return {"questions": SECURITY_QUESTIONS}
+
+
+@api.post("/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordReq):
+    """Return the user's security question. Returns 404 if phone not found."""
+    user = await db.users.find_one({"phone": req.phone})
+    if not user or not user.get("security_question"):
+        raise HTTPException(status_code=404, detail="No account or no security question set")
+    return {
+        "phone": user["phone"],
+        "name": user["name"],
+        "security_question": user["security_question"],
+        "helpline": "+91 63521 72550",
+    }
+
+
+@api.post("/auth/reset-password", response_model=AuthResp)
+async def reset_password(req: ResetPasswordReq):
+    user = await db.users.find_one({"phone": req.phone})
+    if not user or not user.get("security_answer_hash"):
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not verify_pw(req.security_answer.strip().lower(), user["security_answer_hash"]):
+        raise HTTPException(status_code=401, detail="Wrong answer. Call helpline +91 63521 72550 if stuck.")
+    await db.users.update_one(
+        {"_id": user["_id"]}, {"$set": {"password_hash": hash_pw(req.new_password)}}
+    )
+    await _refresh_subscription(user)
+    token = make_token(user["_id"])
+    fresh = await db.users.find_one({"_id": user["_id"]}, {"password_hash": 0})
+    return AuthResp(token=token, user=to_user_public(fresh))
+
+
+# ---------- Admin endpoints ----------
+def _check_admin(token: str):
+    if not ADMIN_PASSWORD or token != f"admin:{ADMIN_PASSWORD}":
+        raise HTTPException(status_code=401, detail="Admin auth required")
+
+
+@api.post("/admin/login")
+async def admin_login(req: AdminLoginReq):
+    if not ADMIN_PASSWORD or req.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+    return {"token": f"admin:{ADMIN_PASSWORD}"}
+
+
+@api.get("/admin/users")
+async def admin_list_users(q: Optional[str] = None, admin_token: str = ""):
+    _check_admin(admin_token)
+    query: dict = {}
+    if q:
+        query = {"$or": [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"phone": {"$regex": q}},
+        ]}
+    out = []
+    async for u in db.users.find(query, {"password_hash": 0, "security_answer_hash": 0}).limit(100):
+        out.append({
+            "id": u["_id"],
+            "name": u["name"],
+            "phone": u["phone"],
+            "role": u["role"],
+            "security_question": u.get("security_question"),
+            "subscription_status": u.get("subscription_status"),
+            "created_at": u.get("created_at"),
+        })
+    return out
+
+
+@api.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, req: AdminResetReq, admin_token: str = ""):
+    _check_admin(admin_token)
+    u = await db.users.find_one({"_id": user_id})
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.users.update_one(
+        {"_id": user_id}, {"$set": {"password_hash": hash_pw(req.new_password)}}
+    )
+    return {"ok": True, "user_id": user_id, "name": u["name"], "phone": u["phone"]}
 
 
 async def _refresh_subscription(user: dict):
