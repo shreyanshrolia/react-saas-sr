@@ -164,3 +164,21 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: "Built the missing Admin Panel frontend. Routes: /(admin)/login and /(admin)/dashboard. Backend admin endpoints already exist and were verified in prior iterations. Please test: (1) navigate to /(admin)/login, sign in with admin password 'grihkari-admin-2026' (it should accept and route to dashboard), (2) on dashboard verify the list loads, search by phone like '9999999991' filters results, (3) tap Reset for any user, enter a new password (min 6 chars) or use auto-generate, submit, expect success modal with credentials, (4) verify the user can then log in via /(auth)/login with the new password, (5) wrong admin password shows error, (6) sign out clears token and routes back to /(admin)/login. Frontend-only testing requested. Admin credential is in /app/memory/test_credentials.md."
+
+
+backend:
+  - task: "Backend modular refactor (server.py split into core/models/services/routes)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Refactored 1683-line server.py into ~60-line entrypoint + core/ (config, db, security, time_utils, deps), models/ (auth, clients, entries, notifications, bills, reports, subscription), services/ (users, clients, entries, bills, notifications, subscription), routes/ (auth, admin, clients, entries, notifications, bills, reports, subscription, misc). NO route paths or contracts changed. All endpoints still under /api. Verified manually via curl: /api/, /api/auth/login, /api/admin/login, /api/admin/users all 200. Need full regression to confirm every endpoint behaves identically."
+
+agent_communication:
+    - agent: "main"
+      message: "Backend refactor complete. server.py now only wires together CORS, the master /api APIRouter, and startup/shutdown. All 9 route groups live under /app/backend/routes/. No URL paths or response shapes changed. Quick smoke tests via curl pass. Please run a BACKEND-ONLY regression covering: (1) /api/auth (signup, login, me, security-questions, forgot-password, reset-password), (2) /api/admin (login + list + reset, including q= search and 401s), (3) /api/clients CRUD + delete-request/confirm/deny linked flow, (4) /api/entries CRUD + return-confirm/deny + delete-request/confirm/deny, (5) /api/notifications, (6) /api/bills (generate, list, payments, mark-paid, delete-payment + carry-forward across months), (7) /api/reports/{monthly,yearly,by-client}, (8) /api/subscription/{plans,create-order,verify-payment,activate}, (9) /api/my/iron-men. Use credentials from /app/memory/test_credentials.md. Skip frontend."
