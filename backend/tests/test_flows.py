@@ -216,16 +216,13 @@ class TestSubscription:
         assert p["trial_days"] == 45
 
     def test_activate_for_iron(self, api_client, iron_headers):
+        # Iteration 4: legacy /subscription/activate is disabled when Razorpay is enabled.
+        # Real activation now goes through create-order + verify-payment (covered in
+        # test_iteration4_razorpay.py).
         r = api_client.post(f"{BASE}/api/subscription/activate",
                             headers=iron_headers, json={"plan": "iron_man"})
-        assert r.status_code == 200, r.text
-        u = r.json()
-        assert u["subscription_status"] == "active"
-        assert u["subscription_ends_at"] is not None
-        # verify via /me
-        me = api_client.get(f"{BASE}/api/auth/me",
-                            headers={"Authorization": iron_headers["Authorization"]})
-        assert me.json()["subscription_status"] == "active"
+        assert r.status_code == 400, r.text
+        assert "create-order" in r.json()["detail"]
 
     def test_activate_wrong_plan_400(self, api_client, iron_headers):
         r = api_client.post(f"{BASE}/api/subscription/activate",

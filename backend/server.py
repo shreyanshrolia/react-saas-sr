@@ -4,6 +4,8 @@ Roles: iron_man, client. Auto-link via phone.
 """
 import os
 import uuid
+import hmac
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,6 +13,7 @@ from typing import List, Optional, Literal
 
 import bcrypt
 import jwt
+import razorpay
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -29,6 +32,12 @@ JWT_EXP_DAYS = 30
 TRIAL_DAYS = 45
 IRON_PLAN_INR = 49
 CLIENT_PLAN_INR = 19
+SUBSCRIPTION_DAYS = 30
+
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_ENABLED else None
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -176,8 +185,18 @@ class PaymentPublic(BaseModel):
 
 
 class SubscribeReq(BaseModel):
-    # Razorpay placeholder. In production this would verify payment signature.
+    # Legacy placeholder activation (kept for fallback when RAZORPAY_ENABLED is False).
     plan: Role
+
+
+class CreateOrderReq(BaseModel):
+    plan: Role
+
+
+class VerifyPaymentReq(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 
 # ---------- Helpers ----------
@@ -975,25 +994,137 @@ async def get_plans():
         "iron_man": {"amount": IRON_PLAN_INR, "currency": "INR", "interval": "monthly"},
         "client": {"amount": CLIENT_PLAN_INR, "currency": "INR", "interval": "monthly"},
         "trial_days": TRIAL_DAYS,
+        "razorpay_enabled": RAZORPAY_ENABLED,
+        "razorpay_key_id": RAZORPAY_KEY_ID if RAZORPAY_ENABLED else None,
     }
 
 
-@api.post("/subscription/activate", response_model=UserPublic)
-async def activate_subscription(req: SubscribeReq, user=Depends(get_current_user)):
-    """Placeholder activation. In production this verifies Razorpay payment signature.
-    For now, marks the user as active for 30 days.
-    """
-    if req.plan != user["role"]:
-        raise HTTPException(status_code=400, detail="Plan does not match user role")
-    new_end = now_utc() + timedelta(days=30)
+def _plan_amount(plan: str) -> int:
+    if plan == "iron_man":
+        return IRON_PLAN_INR
+    if plan == "client":
+        return CLIENT_PLAN_INR
+    raise HTTPException(status_code=400, detail="Invalid plan")
+
+
+async def _activate_subscription(user_id: str) -> dict:
+    new_end = now_utc() + timedelta(days=SUBSCRIPTION_DAYS)
     await db.users.update_one(
-        {"_id": user["_id"]},
+        {"_id": user_id},
         {"$set": {
             "subscription_status": "active",
             "subscription_ends_at": iso(new_end),
         }},
     )
-    fresh = await db.users.find_one({"_id": user["_id"]}, {"password_hash": 0})
+    return await db.users.find_one({"_id": user_id}, {"password_hash": 0})
+
+
+@api.post("/subscription/create-order")
+async def create_subscription_order(req: CreateOrderReq, user=Depends(get_current_user)):
+    """Creates a Razorpay Order for the user's plan. Returns details the client uses to open Checkout."""
+    if not RAZORPAY_ENABLED:
+        raise HTTPException(status_code=503, detail="Payment gateway not configured")
+    if req.plan != user["role"]:
+        raise HTTPException(status_code=400, detail="Plan does not match user role")
+    amount_inr = _plan_amount(req.plan)
+    amount_paise = amount_inr * 100
+    # Receipt must be <= 40 chars per Razorpay docs
+    receipt = f"grihkari_{user['_id'][:8]}_{int(now_utc().timestamp())}"
+    try:
+        order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt,
+            "payment_capture": 1,
+            "notes": {
+                "user_id": user["_id"],
+                "phone": user["phone"],
+                "plan": req.plan,
+            },
+        })
+    except Exception as e:
+        log.exception("Razorpay order create failed")
+        raise HTTPException(status_code=502, detail=f"Razorpay error: {e}") from e
+
+    # Persist order locally for audit
+    await db.subscription_orders.insert_one({
+        "_id": order["id"],
+        "user_id": user["_id"],
+        "plan": req.plan,
+        "amount": amount_paise,
+        "currency": "INR",
+        "status": "created",
+        "created_at": iso(now_utc()),
+    })
+    return {
+        "order_id": order["id"],
+        "amount": amount_paise,  # paise
+        "amount_inr": amount_inr,
+        "currency": "INR",
+        "key_id": RAZORPAY_KEY_ID,
+        "name": "Grihkari",
+        "description": f"{'Iron Man' if req.plan == 'iron_man' else 'Client'} Premium — Monthly",
+        "prefill": {
+            "name": user["name"],
+            "contact": user["phone"],
+        },
+        "theme_color": "#1E3A8A",
+    }
+
+
+@api.post("/subscription/verify-payment", response_model=UserPublic)
+async def verify_subscription_payment(req: VerifyPaymentReq, user=Depends(get_current_user)):
+    """Verifies the Razorpay payment signature and activates the user's subscription."""
+    if not RAZORPAY_ENABLED:
+        raise HTTPException(status_code=503, detail="Payment gateway not configured")
+
+    body = f"{req.razorpay_order_id}|{req.razorpay_payment_id}".encode()
+    expected = hmac.new(
+        RAZORPAY_KEY_SECRET.encode(),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, req.razorpay_signature):
+        # Only downgrade audit status if not already paid
+        await db.subscription_orders.update_one(
+            {"_id": req.razorpay_order_id, "status": {"$ne": "paid"}},
+            {"$set": {"status": "signature_failed", "verified_at": iso(now_utc())}},
+        )
+        raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    # Confirm the order belongs to this user
+    order_doc = await db.subscription_orders.find_one({"_id": req.razorpay_order_id})
+    if not order_doc:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order_doc["user_id"] != user["_id"]:
+        raise HTTPException(status_code=403, detail="Order does not belong to user")
+
+    # Idempotent: if already paid, just return current user state without re-extending
+    if order_doc.get("status") == "paid":
+        fresh = await db.users.find_one({"_id": user["_id"]}, {"password_hash": 0})
+        return to_user_public(fresh)
+
+    # Mark order paid + activate
+    await db.subscription_orders.update_one(
+        {"_id": req.razorpay_order_id},
+        {"$set": {
+            "status": "paid",
+            "razorpay_payment_id": req.razorpay_payment_id,
+            "verified_at": iso(now_utc()),
+        }},
+    )
+    fresh = await _activate_subscription(user["_id"])
+    return to_user_public(fresh)
+
+
+@api.post("/subscription/activate", response_model=UserPublic)
+async def activate_subscription(req: SubscribeReq, user=Depends(get_current_user)):
+    """Legacy placeholder activation. Only allowed when Razorpay is NOT configured."""
+    if RAZORPAY_ENABLED:
+        raise HTTPException(status_code=400, detail="Use /subscription/create-order + /subscription/verify-payment")
+    if req.plan != user["role"]:
+        raise HTTPException(status_code=400, detail="Plan does not match user role")
+    fresh = await _activate_subscription(user["_id"])
     return to_user_public(fresh)
 
 
