@@ -48,7 +48,7 @@ def to_bill_public(b: dict) -> BillPublic:
 async def aggregate_bill_for(client_id: str, month: str) -> Tuple[int, float]:
     qty = 0
     amt = 0.0
-    async for e in db.entries.find({"client_id": client_id, "month_key": month}):
+    async for e in db.entries.find({"client_id": client_id, "month_key": month}, {"total_quantity": 1, "total_amount": 1}):
         qty += int(e.get("total_quantity", 0))
         amt += float(e.get("total_amount", 0))
     return qty, round(amt, 2)

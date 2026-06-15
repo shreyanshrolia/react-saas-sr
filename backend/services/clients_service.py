@@ -10,7 +10,7 @@ async def client_stats(client_doc: dict) -> dict:
         {"client_id": cid, "status": "pending"}
     )
     mk = current_month_key()
-    cur = db.entries.find({"client_id": cid, "month_key": mk})
+    cur = db.entries.find({"client_id": cid, "month_key": mk}, {"total_amount": 1})
     total = 0.0
     async for e in cur:
         total += float(e.get("total_amount", 0))

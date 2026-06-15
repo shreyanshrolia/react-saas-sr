@@ -75,7 +75,7 @@ async def list_entries(
     if month:
         q["month_key"] = month
     out = []
-    async for e in db.entries.find(q).sort("date_given", -1):
+    async for e in db.entries.find(q).sort("date_given", -1).limit(2000):
         out.append(to_entry_public(e))
     return out
 

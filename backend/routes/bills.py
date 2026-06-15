@@ -51,7 +51,7 @@ async def list_bills(
             await ensure_bill(user["_id"], c, current_month_key())
 
     out = []
-    async for b in db.bills.find(q).sort("month", -1):
+    async for b in db.bills.find(q).sort("month", -1).limit(500):
         out.append(to_bill_public(b))
     return out
 
@@ -109,7 +109,7 @@ async def list_bill_payments(bill_id: str, user=Depends(get_current_user)):
     if user["role"] == "client" and b.get("linked_user_id") != user["_id"]:
         raise HTTPException(status_code=403, detail="Forbidden")
     out = []
-    async for p in db.payments.find({"bill_id": bill_id}).sort("paid_at", -1):
+    async for p in db.payments.find({"bill_id": bill_id}).sort("paid_at", -1).limit(200):
         out.append(PaymentPublic(
             id=p["_id"],
             bill_id=p["bill_id"],
