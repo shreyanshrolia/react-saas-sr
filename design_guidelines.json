@@ -1,0 +1,114 @@
+{
+  "project_name": "Grihkari",
+  "app_type": "hybrid_fullstack (React Expo / Mobile-first Web)",
+  "theme_archetype": {
+    "theme": "Light",
+    "archetype_id": "1",
+    "archetype_name": "Organic & Earthy",
+    "reasoning": "This app serves local vendors (Dhobis) and households in India. It needs to feel grounded, trustworthy, and highly accessible for users who may not be tech-savvy. The organic archetype avoids clinical 'tech' aesthetics and instead provides a warm, tactile, and calm interface."
+  },
+  "typography": {
+    "strategy": "Soft Utility (Friendly yet highly legible)",
+    "heading_font": "Outfit",
+    "body_font": "Manrope",
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight text-slate-800",
+      "h3": "text-xl font-medium text-slate-800",
+      "h4": "text-lg font-medium text-slate-700",
+      "body": "text-base leading-relaxed text-slate-600",
+      "small_labels": "text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"
+    },
+    "i18n_notes": "Since the app supports English and Hindi, fonts must support Devanagari script gracefully. Manrope has excellent legibility for complex scripts."
+  },
+  "color_palette": {
+    "background": {
+      "primary": "#FAF9F6",
+      "secondary": "#F3F4F6",
+      "tailwind_classes": "bg-[#FAF9F6] text-slate-800"
+    },
+    "brand_primary": {
+      "hex": "#1E3A8A",
+      "tailwind": "blue-900",
+      "usage": "Headers, primary CTA backgrounds, active states. Represents trust, water, and cleanliness (Neel/Indigo)."
+    },
+    "brand_accent": {
+      "hex": "#EA580C",
+      "tailwind": "orange-600",
+      "usage": "Alerts, pending payment badges, unreturned clothes notifications. High contrast."
+    },
+    "surfaces": {
+      "card": "#FFFFFF",
+      "border": "#E2E8F0",
+      "glass": "bg-white/80 backdrop-blur-xl border-white/40"
+    },
+    "text": {
+      "primary": "#0F172A",
+      "secondary": "#475569",
+      "disabled": "#94A3B8"
+    },
+    "contrast_rules": "All text must pass WCAG AA. Primary buttons must use white text on blue-900 background. Avoid generic blue; use deep indigo."
+  },
+  "spacing_and_layout": {
+    "container": "w-full max-w-md mx-auto min-h-screen bg-[#FAF9F6] relative shadow-2xl overflow-hidden",
+    "generous_spacing": "Use p-6 for main container padding, gap-4 or gap-6 for lists to ensure clear touch targets.",
+    "touch_targets": "Minimum height for interactive elements (buttons, inputs, list items) must be 48px (h-12).",
+    "navigation": "Use a sticky Bottom Navigation Bar with 3-4 distinct icons for mobile context, avoiding desktop-style sidebars.",
+    "alignment": "Left-align list items and forms. Center-align empty states and success messages."
+  },
+  "surface_strategies": {
+    "cards": "The 'Tactile' Neumorphism variant: Flat white background, 1px subtle border (border-slate-100), soft shadow (shadow-sm). rounded-2xl.",
+    "header": "Solid or Crystal Glass (bg-white/80 backdrop-blur-xl border-b border-slate-200) z-50 sticky top-0.",
+    "bottom_nav": "Solid white background, shadow-[0_-4px_20px_rgba(0,0,0,0.05)], rounded-t-3xl border-t border-slate-100."
+  },
+  "component_rules": {
+    "buttons": "Rounded-xl or full pill shape. Active/hover states must visibly darken the color and add a slight transform (-translate-y-[1px]).",
+    "inputs": "Shadcn UI inputs with rounded-xl, h-12, bg-slate-50. Focus state: ring-2 ring-blue-900/20 border-blue-900.",
+    "lists": "Use prominent rows with left-aligned icon/avatar, center text content, and right-aligned action/price. Divide with border-b border-slate-100.",
+    "badges": "rounded-full px-3 py-1 text-xs font-medium. Paid: bg-green-100 text-green-800. Pending: bg-orange-100 text-orange-800.",
+    "modals": "Bottom sheet style Dialogs (rounded-t-3xl) instead of centered desktop modals, to match mobile UX."
+  },
+  "motion_interactions": {
+    "click_states": "active:scale-95 transition-transform duration-150",
+    "page_transitions": "Slide in from right or fade in (duration-200 ease-out)",
+    "list_stagger": "Staggered fade-up for list items in the dashboard.",
+    "accessibility": "Respect prefers-reduced-motion for all transitions."
+  },
+  "media_assets": {
+    "image_urls": {
+      "onboarding_hero": {
+        "url": "https://images.unsplash.com/photo-1540544093-b0880061e1a5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwzfHxpcm9uaW5nJTIwY2xvdGhlc3xlbnwwfHx8fDE3ODE1MDYxOTF8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Used white and gray steam iron - for onboarding background or vendor profile header.",
+        "usage": "Use as a background layer with a dark overlay (bg-black/40) for text legibility, or in an onboarding carousel."
+      },
+      "empty_state_illustration": {
+        "url": "https://images.pexels.com/photos/28576633/pexels-photo-28576633.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Neatly organized ironing board in bright minimalist room.",
+        "usage": "Use in 'No clothes given yet' or 'No active clients' empty states."
+      },
+      "auth_background": {
+        "url": "https://images.pexels.com/photos/28576619/pexels-photo-28576619.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Stack of freshly ironed clothes next to a steam iron.",
+        "usage": "Use at the top of the login/signup screen with a soft gradient fade into the #FAF9F6 background."
+      }
+    },
+    "icons": {
+      "library": "lucide-react",
+      "strategy": "Use stroke-width 1.5 or 2 for a clean, line-art look. Avoid solid filled icons unless representing active state in bottom nav."
+    }
+  },
+  "testing_attributes": {
+    "rule": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case, role-based format.",
+    "examples": ["data-testid='login-phone-input'", "data-testid='add-client-button'", "data-testid='bill-status-badge'"]
+  },
+  "instructions_to_main_agent": [
+    "This is a mobile app simulated in a web environment. Wrap the main application layout in a mobile container: <div className='w-full max-w-md mx-auto min-h-screen bg-[#FAF9F6] relative shadow-2xl overflow-x-hidden'>",
+    "Use a bottom navigation bar layout instead of top/side nav. Fix it to the bottom of the max-w-md container.",
+    "Implement language toggle (English/Hindi) using standard React state or context, placed subtly in the profile or header section.",
+    "Since it's Indian currency, use the ₹ symbol explicitly for all rates and bills.",
+    "Use standard Shadcn components but heavily customize them with the soft utility theme: larger touch targets, rounded-xl/2xl, and the #FAF9F6/#1E3A8A color palette.",
+    "Implement the 3 main views: Auth (Phone Login), Iron Man Dashboard (Client List, Add Entry), and Client Dashboard (Clothes Status, Bill).",
+    "Do not use generic blue defaults. Replace with 'blue-900' for primary accents.",
+    "For the subscription paywall, create a dedicated full-screen view with a prominent CTA and clear value propositions."
+  ]
+}
