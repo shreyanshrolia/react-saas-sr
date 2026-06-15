@@ -20,7 +20,7 @@ async def report_monthly(year: Optional[int] = None, user=Depends(get_current_us
         q["iron_man_id"] = user["_id"]
     else:
         q["linked_user_id"] = user["_id"]
-    async for e in db.entries.find(q):
+    async for e in db.entries.find(q, {"month_key": 1, "total_quantity": 1, "total_amount": 1}):
         if not e.get("month_key", "").startswith(str(yr)):
             continue
         m = e["month_key"]
@@ -32,7 +32,7 @@ async def report_monthly(year: Optional[int] = None, user=Depends(get_current_us
 
     bq = dict(q)
     paid_map: dict = {}
-    async for b in db.bills.find(bq):
+    async for b in db.bills.find(bq, {"month": 1, "paid": 1, "total_amount": 1}):
         if not b["month"].startswith(str(yr)):
             continue
         rec = paid_map.setdefault(b["month"], {"paid": 0.0, "unpaid": 0.0})
@@ -63,7 +63,7 @@ async def report_yearly(user=Depends(get_current_user)):
     else:
         q["linked_user_id"] = user["_id"]
     years: dict = {}
-    async for e in db.entries.find(q):
+    async for e in db.entries.find(q, {"month_key": 1, "total_quantity": 1, "total_amount": 1}):
         yr = e.get("month_key", "")[:4]
         if not yr:
             continue
@@ -89,7 +89,7 @@ async def report_by_client(month: Optional[str] = None, user=Depends(get_current
     eq = {"iron_man_id": user["_id"]}
     if month:
         eq["month_key"] = month
-    async for e in db.entries.find(eq):
+    async for e in db.entries.find(eq, {"client_id": 1, "client_name": 1, "client_phone": 1, "total_quantity": 1, "total_amount": 1}):
         cid = e["client_id"]
         if cid not in rows:
             rows[cid] = {
@@ -106,7 +106,7 @@ async def report_by_client(month: Optional[str] = None, user=Depends(get_current
     bq = {"iron_man_id": user["_id"]}
     if month:
         bq["month"] = month
-    async for b in db.bills.find(bq):
+    async for b in db.bills.find(bq, {"client_id": 1, "paid": 1, "total_amount": 1}):
         cid = b["client_id"]
         if cid not in rows:
             continue
