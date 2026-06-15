@@ -9,6 +9,13 @@ import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
 import { formatINR, formatMonth } from "@/src/utils/format";
 
+const STATUS_COLORS: Record<Bill["status"], { bg: string; fg: string; label: string }> = {
+  paid: { bg: colors.successLight, fg: colors.success, label: "Paid" },
+  overpaid: { bg: "#DBEAFE", fg: colors.primary, label: "Overpaid" },
+  partial: { bg: "#FEF3C7", fg: "#B45309", label: "Partial" },
+  unpaid: { bg: colors.warningLight, fg: colors.warning, label: "Unpaid" },
+};
+
 export default function ClientBills() {
   const { t } = useI18n();
   const [bills, setBills] = useState<Bill[]>([]);
@@ -20,9 +27,7 @@ export default function ClientBills() {
     try {
       const data = await api.get<Bill[]>("/bills");
       setBills(data);
-    } catch {
-      // ignore
-    } finally {
+    } catch {/* ignore */} finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -30,9 +35,16 @@ export default function ClientBills() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const filtered = bills.filter((b) => filter === "all" ? true : filter === "paid" ? b.paid : !b.paid);
-  const totalUnpaid = bills.filter((b) => !b.paid).reduce((s, b) => s + b.total_amount, 0);
-  const totalPaid = bills.filter((b) => b.paid).reduce((s, b) => s + b.total_amount, 0);
+  const filtered = bills.filter((b) => {
+    if (filter === "all") return true;
+    if (filter === "paid") return b.status === "paid" || b.status === "overpaid";
+    return b.status === "unpaid" || b.status === "partial";
+  });
+
+  const totalUnpaid = bills
+    .filter((b) => b.status === "unpaid" || b.status === "partial")
+    .reduce((s, b) => s + b.balance, 0);
+  const totalPaid = bills.reduce((s, b) => s + b.amount_paid, 0);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -43,7 +55,7 @@ export default function ClientBills() {
       <View style={styles.statsRow}>
         <View style={[styles.statCard, { backgroundColor: colors.warningLight }]}>
           <Text style={[styles.statValue, { color: colors.warning }]}>{formatINR(totalUnpaid)}</Text>
-          <Text style={[styles.statLabel, { color: colors.warning }]}>{t("unpaid")}</Text>
+          <Text style={[styles.statLabel, { color: colors.warning }]}>You owe</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: colors.successLight }]}>
           <Text style={[styles.statValue, { color: colors.success }]}>{formatINR(totalPaid)}</Text>
@@ -70,26 +82,61 @@ export default function ClientBills() {
           keyExtractor={(it) => it.id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
-          renderItem={({ item }) => (
-            <View style={styles.billCard} testID={`bill-${item.id}`}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.billMonth}>{formatMonth(item.month)}</Text>
-                <Text style={styles.billSub}>{item.total_quantity} {t("pieces")} • {item.client_name}</Text>
-              </View>
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={styles.billAmount}>{formatINR(item.total_amount)}</Text>
-                <View style={[styles.statusBadge, item.paid ? styles.paidBadge : styles.unpaidBadge]}>
-                  <Ionicons name={item.paid ? "checkmark-circle" : "time"} size={12} color={item.paid ? colors.success : colors.warning} />
-                  <Text style={[styles.statusText, { color: item.paid ? colors.success : colors.warning }]}>
-                    {item.paid ? t("paid") : t("unpaid")}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          )}
+          renderItem={({ item }) => <BillRow bill={item} t={t} />}
         />
       )}
     </SafeAreaView>
+  );
+}
+
+function BillRow({ bill, t }: { bill: Bill; t: (k: any) => string }) {
+  const sc = STATUS_COLORS[bill.status];
+  return (
+    <View style={styles.billCard} testID={`bill-${bill.id}`}>
+      <View style={styles.billHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.billMonth}>{formatMonth(bill.month)}</Text>
+          <Text style={styles.billSub}>{bill.total_quantity} {t("pieces")} • {bill.client_name}</Text>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: sc.bg }]}>
+          <Text style={[styles.statusText, { color: sc.fg }]}>{sc.label}</Text>
+        </View>
+      </View>
+
+      <View style={styles.breakdown}>
+        <Row label={t("clothes_amount")} value={formatINR(bill.clothes_amount)} />
+        {bill.carry_in !== 0 ? (
+          <Row
+            label={t("carry_forward")}
+            value={`${bill.carry_in > 0 ? "+" : ""}${formatINR(bill.carry_in)}`}
+            color={bill.carry_in > 0 ? colors.warning : colors.success}
+          />
+        ) : null}
+        <Row label={t("net_due")} value={formatINR(bill.net_due)} bold />
+        <Row label={t("amount_paid")} value={`− ${formatINR(bill.amount_paid)}`} color={colors.success} />
+        <View style={styles.divider} />
+        <Row
+          label={bill.balance < 0 ? "Credit balance" : t("balance")}
+          value={formatINR(Math.abs(bill.balance))}
+          color={bill.balance > 0 ? colors.warning : bill.balance < 0 ? colors.primary : colors.success}
+          big
+        />
+      </View>
+    </View>
+  );
+}
+
+function Row({ label, value, color, bold, big }: { label: string; value: string; color?: string; bold?: boolean; big?: boolean }) {
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.rowLabel, big && { fontSize: 13 }]}>{label}</Text>
+      <Text style={[
+        styles.rowValue,
+        bold && { fontWeight: "800" },
+        big && { fontSize: 18, fontWeight: "800" },
+        color ? { color } : null,
+      ]}>{value}</Text>
+    </View>
   );
 }
 
@@ -121,17 +168,16 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md },
   emptyText: { color: colors.textSecondary },
 
-  billCard: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: colors.card, padding: spacing.lg, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: colors.borderLight, marginBottom: spacing.md,
-  },
+  billCard: { backgroundColor: colors.card, padding: spacing.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderLight, marginBottom: spacing.md },
+  billHeader: { flexDirection: "row", alignItems: "center" },
   billMonth: { fontSize: 16, fontWeight: "700", color: colors.text },
   billSub: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
-  billAmount: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: 6 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
+  statusText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
 
-  statusBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
-  paidBadge: { backgroundColor: colors.successLight },
-  unpaidBadge: { backgroundColor: colors.warningLight },
-  statusText: { fontSize: 11, fontWeight: "700" },
+  breakdown: { marginTop: spacing.md, padding: spacing.md, backgroundColor: colors.bgSecondary, borderRadius: radius.md, gap: 6 },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  rowLabel: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
+  rowValue: { fontSize: 13, color: colors.text, fontWeight: "600" },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },
 });

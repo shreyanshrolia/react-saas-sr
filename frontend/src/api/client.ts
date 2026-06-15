@@ -105,10 +105,27 @@ export interface Bill {
   client_phone: string;
   month: string;
   total_quantity: number;
+  clothes_amount: number;
+  carry_in: number;
+  net_due: number;
+  amount_paid: number;
+  balance: number;
+  status: "unpaid" | "partial" | "paid" | "overpaid";
   total_amount: number;
   paid: boolean;
   paid_at?: string | null;
   generated_at: string;
+}
+
+export interface Payment {
+  id: string;
+  bill_id: string;
+  iron_man_id: string;
+  client_id: string;
+  client_name: string;
+  amount: number;
+  paid_at: string;
+  notes?: string | null;
 }
 
 export interface MonthlyReport {

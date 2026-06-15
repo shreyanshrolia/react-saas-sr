@@ -124,7 +124,7 @@ export default function ClientDetail() {
           <View style={styles.empty}>
             <Ionicons name="shirt-outline" size={48} color={colors.textMuted} />
             <Text style={styles.emptyText}>No entries yet</Text>
-            <TouchableOpacity testID="goto-add" style={styles.emptyBtn} onPress={() => router.push("/(iron)/add-entry")}>
+            <TouchableOpacity testID="goto-add" style={styles.emptyBtn} onPress={() => router.push(`/(iron)/add-entry?clientId=${client.id}` as any)}>
               <Text style={styles.emptyBtnText}>{t("add_entry")}</Text>
             </TouchableOpacity>
           </View>

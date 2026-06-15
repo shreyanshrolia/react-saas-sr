@@ -87,34 +87,43 @@ export default function ClientsScreen() {
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              testID={`client-card-${item.id}`}
-              style={styles.card}
-              onPress={() => router.push(`/(iron)/client/${item.id}` as any)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
-                {item.linked_user_id ? <View style={styles.linkedDot} /> : null}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.cardName}>{item.name}</Text>
-                <Text style={styles.cardPhone}>+91 {item.phone}</Text>
-                <View style={styles.metaRow}>
-                  {item.pending_count > 0 ? (
-                    <View style={styles.pendingBadge}>
-                      <Ionicons name="time-outline" size={12} color={colors.warning} />
-                      <Text style={styles.pendingText}>{item.pending_count} {t("pending")}</Text>
-                    </View>
-                  ) : null}
+            <View testID={`client-card-${item.id}`} style={styles.card}>
+              <TouchableOpacity
+                style={styles.cardMain}
+                onPress={() => router.push(`/(iron)/client/${item.id}` as any)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+                  {item.linked_user_id ? <View style={styles.linkedDot} /> : null}
                 </View>
-              </View>
-              <View style={styles.cardRight}>
-                <Text style={styles.amount}>{formatINR(item.current_month_amount)}</Text>
-                <Text style={styles.amountLabel}>{t("this_month")}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardName}>{item.name}</Text>
+                  <Text style={styles.cardPhone}>+91 {item.phone}</Text>
+                  <View style={styles.metaRow}>
+                    {item.pending_count > 0 ? (
+                      <View style={styles.pendingBadge}>
+                        <Ionicons name="time-outline" size={12} color={colors.warning} />
+                        <Text style={styles.pendingText}>{item.pending_count} {t("pending")}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+                <View style={styles.cardRight}>
+                  <Text style={styles.amount}>{formatINR(item.current_month_amount)}</Text>
+                  <Text style={styles.amountLabel}>{t("this_month")}</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID={`quick-add-entry-${item.id}`}
+                style={styles.quickAddBtn}
+                onPress={() => router.push(`/(iron)/add-entry?clientId=${item.id}` as any)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add" size={16} color={colors.primary} />
+                <Text style={styles.quickAddText}>{t("quick_add_entry")}</Text>
+              </TouchableOpacity>
+            </View>
           )}
         />
       )}
@@ -122,17 +131,22 @@ export default function ClientsScreen() {
       <AddClientModal
         visible={showAdd}
         onClose={() => setShowAdd(false)}
-        onAdded={() => {
+        onAdded={(created) => {
           setShowAdd(false);
-          setToast({ msg: t("success"), variant: "success" });
+          setToast({ msg: `${created.name} added`, variant: "success" });
           load();
+          // Pre-select the just-added client when navigating to add-entry next
+          // so the user can immediately start adding clothes for them.
+          setTimeout(() => {
+            router.push(`/(iron)/add-entry?clientId=${created.id}` as any);
+          }, 500);
         }}
       />
     </SafeAreaView>
   );
 }
 
-function AddClientModal({ visible, onClose, onAdded }: { visible: boolean; onClose: () => void; onAdded: () => void }) {
+function AddClientModal({ visible, onClose, onAdded }: { visible: boolean; onClose: () => void; onAdded: (client: Client) => void }) {
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -154,14 +168,14 @@ function AddClientModal({ visible, onClose, onAdded }: { visible: boolean; onClo
     if (phone.length !== 10) return setErr("Phone must be 10 digits");
     setLoading(true);
     try {
-      await api.post("/clients", {
+      const created = await api.post<Client>("/clients", {
         name: name.trim(),
         phone,
         address: address.trim() || undefined,
         default_rate: parseFloat(rate) || 10,
       });
       reset();
-      onAdded();
+      onAdded(created);
     } catch (e: any) {
       setErr(e?.message || "Failed");
     } finally {
@@ -326,11 +340,22 @@ const styles = StyleSheet.create({
   },
   emptyBtnText: { color: colors.textInverse, fontWeight: "700" },
   card: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: colors.card, padding: spacing.lg,
-    borderRadius: radius.lg, marginBottom: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    marginBottom: spacing.md,
     borderWidth: 1, borderColor: colors.borderLight,
+    overflow: "hidden",
   },
+  cardMain: {
+    flexDirection: "row", alignItems: "center",
+    padding: spacing.lg,
+  },
+  quickAddBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4,
+    paddingVertical: 10, backgroundColor: "#EEF2FF",
+    borderTopWidth: 1, borderTopColor: colors.borderLight,
+  },
+  quickAddText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   avatar: {
     width: 48, height: 48, borderRadius: radius.md,
     backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center",

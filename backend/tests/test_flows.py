@@ -213,7 +213,7 @@ class TestSubscription:
         assert p["iron_man"]["amount"] == 49
         assert p["client"]["amount"] == 19
         assert p["iron_man"]["currency"] == "INR"
-        assert p["trial_days"] == 7
+        assert p["trial_days"] == 45
 
     def test_activate_for_iron(self, api_client, iron_headers):
         r = api_client.post(f"{BASE}/api/subscription/activate",

@@ -26,7 +26,7 @@ DB_NAME = os.environ["DB_NAME"]
 JWT_SECRET = os.environ.get("JWT_SECRET", "grihkari-dev-secret-change-in-prod")
 JWT_ALGO = "HS256"
 JWT_EXP_DAYS = 30
-TRIAL_DAYS = 7
+TRIAL_DAYS = 45
 IRON_PLAN_INR = 49
 CLIENT_PLAN_INR = 19
 
@@ -143,14 +143,36 @@ class BillPublic(BaseModel):
     client_phone: str
     month: str  # YYYY-MM
     total_quantity: int
-    total_amount: float
-    paid: bool
-    paid_at: Optional[str] = None
+    clothes_amount: float
+    carry_in: float = 0.0
+    net_due: float
+    amount_paid: float = 0.0
+    balance: float
+    status: str  # unpaid | partial | paid | overpaid
+    total_amount: float  # = net_due (kept for backwards compat)
+    paid: bool  # = (status in ['paid', 'overpaid'])
+    paid_at: Optional[str] = None  # last payment time
     generated_at: str
 
 
 class MarkPaidReq(BaseModel):
     paid: bool
+
+
+class PaymentCreateReq(BaseModel):
+    amount: float = Field(..., gt=0)
+    notes: Optional[str] = Field(None, max_length=200)
+
+
+class PaymentPublic(BaseModel):
+    id: str
+    bill_id: str
+    iron_man_id: str
+    client_id: str
+    client_name: str
+    amount: float
+    paid_at: str
+    notes: Optional[str] = None
 
 
 class SubscribeReq(BaseModel):
@@ -521,7 +543,23 @@ async def delete_entry(entry_id: str, user=Depends(get_current_user)):
 
 
 # ---------- Bills ----------
+def _compute_status(net_due: float, amount_paid: float) -> str:
+    if net_due <= 0 and amount_paid <= 0:
+        return "paid"
+    if amount_paid <= 0:
+        return "unpaid"
+    if amount_paid >= net_due:
+        return "overpaid" if amount_paid > net_due else "paid"
+    return "partial"
+
+
 def to_bill_public(b: dict) -> BillPublic:
+    clothes = float(b.get("clothes_amount", b.get("total_amount", 0)))
+    carry = float(b.get("carry_in", 0))
+    paid = float(b.get("amount_paid", 0))
+    net = float(b.get("net_due", clothes + carry))
+    bal = net - paid
+    bill_status = b.get("status") or _compute_status(net, paid)
     return BillPublic(
         id=b["_id"],
         iron_man_id=b["iron_man_id"],
@@ -529,10 +567,16 @@ def to_bill_public(b: dict) -> BillPublic:
         client_name=b.get("client_name", ""),
         client_phone=b.get("client_phone", ""),
         month=b["month"],
-        total_quantity=b["total_quantity"],
-        total_amount=b["total_amount"],
-        paid=b.get("paid", False),
-        paid_at=b.get("paid_at"),
+        total_quantity=int(b.get("total_quantity", 0)),
+        clothes_amount=round(clothes, 2),
+        carry_in=round(carry, 2),
+        net_due=round(net, 2),
+        amount_paid=round(paid, 2),
+        balance=round(bal, 2),
+        status=bill_status,
+        total_amount=round(net, 2),
+        paid=bill_status in ("paid", "overpaid"),
+        paid_at=b.get("last_paid_at"),
         generated_at=b["generated_at"],
     )
 
@@ -546,20 +590,45 @@ async def _aggregate_bill_for(client_id: str, month: str) -> tuple[int, float]:
     return qty, round(amt, 2)
 
 
+async def _get_previous_bill_balance(client_id: str, month: str) -> float:
+    """Return the balance (net_due - amount_paid) of the most recent bill before `month`.
+    Positive => client still owes; Negative => client overpaid (credit)."""
+    prev = await db.bills.find_one(
+        {"client_id": client_id, "month": {"$lt": month}},
+        sort=[("month", -1)],
+    )
+    if not prev:
+        return 0.0
+    net = float(prev.get("net_due", prev.get("total_amount", 0)))
+    paid = float(prev.get("amount_paid", 0))
+    return round(net - paid, 2)
+
+
 async def _ensure_bill(iron_man_id: str, client_doc: dict, month: str) -> dict:
+    qty, clothes_amount = await _aggregate_bill_for(client_doc["_id"], month)
+    carry_in = await _get_previous_bill_balance(client_doc["_id"], month)
+    net_due = round(clothes_amount + carry_in, 2)
     existing = await db.bills.find_one({"client_id": client_doc["_id"], "month": month})
-    qty, amt = await _aggregate_bill_for(client_doc["_id"], month)
     if existing:
-        # Recompute totals if not paid
-        if not existing.get("paid", False):
-            await db.bills.update_one(
-                {"_id": existing["_id"]},
-                {"$set": {"total_quantity": qty, "total_amount": amt}},
-            )
-            existing["total_quantity"] = qty
-            existing["total_amount"] = amt
-        return existing
+        amount_paid = float(existing.get("amount_paid", 0))
+        balance = round(net_due - amount_paid, 2)
+        status = _compute_status(net_due, amount_paid)
+        await db.bills.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {
+                "total_quantity": qty,
+                "clothes_amount": clothes_amount,
+                "carry_in": carry_in,
+                "net_due": net_due,
+                "balance": balance,
+                "status": status,
+                "total_amount": net_due,  # legacy
+                "paid": status in ("paid", "overpaid"),  # legacy
+            }},
+        )
+        return await db.bills.find_one({"_id": existing["_id"]})
     bid = str(uuid.uuid4())
+    status = _compute_status(net_due, 0.0)
     doc = {
         "_id": bid,
         "iron_man_id": iron_man_id,
@@ -569,7 +638,15 @@ async def _ensure_bill(iron_man_id: str, client_doc: dict, month: str) -> dict:
         "linked_user_id": client_doc.get("linked_user_id"),
         "month": month,
         "total_quantity": qty,
-        "total_amount": amt,
+        "clothes_amount": clothes_amount,
+        "carry_in": carry_in,
+        "net_due": net_due,
+        "amount_paid": 0.0,
+        "balance": net_due,
+        "status": status,
+        "last_paid_at": None,
+        # legacy compat
+        "total_amount": net_due,
         "paid": False,
         "paid_at": None,
         "generated_at": iso(now_utc()),
@@ -585,7 +662,8 @@ async def generate_bills(month: Optional[str] = None, user=Depends(get_current_u
     out = []
     async for c in db.clients.find({"iron_man_id": user["_id"]}):
         b = await _ensure_bill(user["_id"], c, target_month)
-        if b["total_amount"] > 0 or b["total_quantity"] > 0:
+        # include if has any activity OR carry_in
+        if b["net_due"] > 0 or b["total_quantity"] > 0 or b.get("carry_in", 0) != 0 or b.get("amount_paid", 0) > 0:
             out.append(to_bill_public(b))
     return out
 
@@ -606,7 +684,7 @@ async def list_bills(
     if month:
         q["month"] = month
 
-    # For current month, ensure bills are up to date for iron_man
+    # For iron_man, refresh current-month bills for all clients
     if user["role"] == "iron_man" and (not month or month == current_month_key()):
         async for c in db.clients.find({"iron_man_id": user["_id"]}):
             await _ensure_bill(user["_id"], c, current_month_key())
@@ -619,14 +697,137 @@ async def list_bills(
 
 @api.post("/bills/{bill_id}/paid", response_model=BillPublic)
 async def mark_bill_paid(bill_id: str, req: MarkPaidReq, user=Depends(get_current_user)):
+    """Legacy endpoint: marks the full balance as paid (or unpaid by deleting all payments)."""
     require_iron(user)
     b = await db.bills.find_one({"_id": bill_id, "iron_man_id": user["_id"]})
     if not b:
         raise HTTPException(status_code=404, detail="Bill not found")
-    upd = {"paid": req.paid, "paid_at": iso(now_utc()) if req.paid else None}
-    await db.bills.update_one({"_id": bill_id}, {"$set": upd})
+    if req.paid:
+        # record a payment for the remaining balance
+        net_due = float(b.get("net_due", b.get("total_amount", 0)))
+        paid = float(b.get("amount_paid", 0))
+        remaining = round(net_due - paid, 2)
+        if remaining > 0:
+            await _create_payment(b, remaining, None)
+    else:
+        # delete all payments for this bill
+        await db.payments.delete_many({"bill_id": bill_id})
+        await db.bills.update_one(
+            {"_id": bill_id},
+            {"$set": {"amount_paid": 0.0, "balance": float(b.get("net_due", 0)),
+                      "status": "unpaid", "last_paid_at": None, "paid": False, "paid_at": None}},
+        )
     b2 = await db.bills.find_one({"_id": bill_id})
     return to_bill_public(b2)
+
+
+async def _create_payment(bill: dict, amount: float, notes: Optional[str]) -> dict:
+    pid = str(uuid.uuid4())
+    now = iso(now_utc())
+    pdoc = {
+        "_id": pid,
+        "iron_man_id": bill["iron_man_id"],
+        "client_id": bill["client_id"],
+        "client_name": bill.get("client_name", ""),
+        "client_phone": bill.get("client_phone", ""),
+        "bill_id": bill["_id"],
+        "month": bill["month"],
+        "amount": float(amount),
+        "paid_at": now,
+        "notes": notes,
+    }
+    await db.payments.insert_one(pdoc)
+    new_paid = round(float(bill.get("amount_paid", 0)) + float(amount), 2)
+    net_due = float(bill.get("net_due", bill.get("total_amount", 0)))
+    balance = round(net_due - new_paid, 2)
+    bs = _compute_status(net_due, new_paid)
+    await db.bills.update_one(
+        {"_id": bill["_id"]},
+        {"$set": {
+            "amount_paid": new_paid,
+            "balance": balance,
+            "status": bs,
+            "last_paid_at": now,
+            "paid": bs in ("paid", "overpaid"),
+            "paid_at": now if bs in ("paid", "overpaid") else None,
+        }},
+    )
+    return pdoc
+
+
+@api.post("/bills/{bill_id}/payments", response_model=PaymentPublic)
+async def record_payment(bill_id: str, req: PaymentCreateReq, user=Depends(get_current_user)):
+    require_iron(user)
+    b = await db.bills.find_one({"_id": bill_id, "iron_man_id": user["_id"]})
+    if not b:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    pdoc = await _create_payment(b, req.amount, req.notes)
+    return PaymentPublic(
+        id=pdoc["_id"],
+        bill_id=pdoc["bill_id"],
+        iron_man_id=pdoc["iron_man_id"],
+        client_id=pdoc["client_id"],
+        client_name=pdoc.get("client_name", ""),
+        amount=float(pdoc["amount"]),
+        paid_at=pdoc["paid_at"],
+        notes=pdoc.get("notes"),
+    )
+
+
+@api.get("/bills/{bill_id}/payments", response_model=List[PaymentPublic])
+async def list_bill_payments(bill_id: str, user=Depends(get_current_user)):
+    b = await db.bills.find_one({"_id": bill_id})
+    if not b:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    if user["role"] == "iron_man" and b["iron_man_id"] != user["_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if user["role"] == "client" and b.get("linked_user_id") != user["_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    out = []
+    async for p in db.payments.find({"bill_id": bill_id}).sort("paid_at", -1):
+        out.append(PaymentPublic(
+            id=p["_id"],
+            bill_id=p["bill_id"],
+            iron_man_id=p["iron_man_id"],
+            client_id=p["client_id"],
+            client_name=p.get("client_name", ""),
+            amount=float(p["amount"]),
+            paid_at=p["paid_at"],
+            notes=p.get("notes"),
+        ))
+    return out
+
+
+@api.delete("/payments/{payment_id}")
+async def delete_payment(payment_id: str, user=Depends(get_current_user)):
+    require_iron(user)
+    p = await db.payments.find_one({"_id": payment_id, "iron_man_id": user["_id"]})
+    if not p:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    await db.payments.delete_one({"_id": payment_id})
+    # Recalculate bill totals
+    b = await db.bills.find_one({"_id": p["bill_id"]})
+    if b:
+        total_paid = 0.0
+        last_at: Optional[str] = None
+        async for pp in db.payments.find({"bill_id": b["_id"]}).sort("paid_at", -1):
+            total_paid += float(pp["amount"])
+            if last_at is None:
+                last_at = pp["paid_at"]
+        net_due = float(b.get("net_due", b.get("total_amount", 0)))
+        bs = _compute_status(net_due, total_paid)
+        await db.bills.update_one(
+            {"_id": b["_id"]},
+            {"$set": {
+                "amount_paid": round(total_paid, 2),
+                "balance": round(net_due - total_paid, 2),
+                "status": bs,
+                "last_paid_at": last_at,
+                "paid": bs in ("paid", "overpaid"),
+                "paid_at": last_at if bs in ("paid", "overpaid") else None,
+            }},
+        )
+    return {"ok": True}
 
 
 # ---------- Reports ----------
@@ -841,6 +1042,8 @@ async def startup():
     await db.entries.create_index("linked_user_id")
     await db.bills.create_index([("client_id", 1), ("month", 1)], unique=True)
     await db.bills.create_index("linked_user_id")
+    await db.payments.create_index("bill_id")
+    await db.payments.create_index("iron_man_id")
     log.info("Grihkari API started")
 
 

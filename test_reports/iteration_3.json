@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 3 backend-only testing. Added /app/backend/tests/test_iteration3.py with 11 new tests covering: (1) TRIAL_DAYS=45 enforced on signup for both iron_man and client (trial_ends_at ~45d from now), (2) GET /api/subscription/plans returns trial_days=45, (3) bill carry-forward across months for partial payments (Dec balance 40 -> Jan carry_in=40, net_due=90, status=unpaid), (4) overpaid carry-forward (-50 credit propagates and reduces next month net_due), (5) multiple payments aggregate into amount_paid/balance with status transitioning unpaid->partial->paid, (6) GET /api/bills/{id}/payments returns payments sorted by paid_at desc, (7) DELETE /api/payments/{id} recomputes bill totals, (8) legacy POST /api/bills/{id}/paid still works (true=>synthetic payment for remaining balance and status=paid; false=>deletes all payments and resets to unpaid), (9) linked client can read bills with all new fields (carry_in/clothes_amount/amount_paid/balance/status) and GET payments read-only, (10) client role gets 403 on POST /api/bills/{id}/payments and DELETE /api/payments/{id}. Also fixed a stale assertion in test_flows.py::TestSubscription::test_plans (was asserting trial_days==7, now 45). Full suite = 39/39 passing (100%).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/test_flows.py",
+    "/app/test_reports/pytest/pytest_iter3.xml",
+    "/app/test_reports/pytest/pytest_full_iter3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1053 lines - over the 700-line guideline. Consider splitting into routers/{auth,clients,entries,bills,payments,subscription}.py modules.",
+    "_compute_status edge case: when net_due<=0 and amount_paid<=0 it returns 'unpaid' (line 547-548). This means a -50 credit bill (overpaid carry) is shown as 'unpaid' even though the customer actually has credit. UI may want to treat negative balance specially. Verified via TestCarryForwardOverpaid - status was implicit, not asserted, but the math (carry_in=-50, net_due=-20, balance=-20) is correct.",
+    "MarkPaidReq.paid=true creates a synthetic payment with notes=None even when remaining<=0 (no-op currently). Fine, but consider returning an error or 200 with no-change for clarity."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3.py (new)",
+    "/app/backend/tests/test_flows.py (fixed stale trial_days assertion 7 -> 45)"
+  ],
+  "success_rate": {"backend": "100% (39/39 - 11 new iter-3 + 28 prior)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Trial tests use phones 9888777111 (iron_man) and 9888777112 (client) - cleaned up via direct mongo delete before+after to keep signup idempotent. All other tests use TEST_-prefixed clients with random throwaway phones starting with 8, cleaned in finally blocks. Seed users 9999999991/2 are preserved.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run `pytest /app/backend/tests/ -v` from /app/backend. All 39 tests idempotent. Iteration 3 introduces payments collection - delete db.payments to start clean. Bill totals (amount_paid/balance/status) are derived from db.payments via _create_payment/delete_payment, so manual mongo edits to bills won't survive next payment write. Note: trial tests do direct db.users.delete_many on phones 9888777111/2 - PyMongo is a hard dep for these tests.",
+  "rca_of_issue": "N/A - iteration 3 is feature addition, all features verified working as spec'd. Carry-forward math: _ensure_bill computes carry_in from previous month's (net_due - amount_paid). Status: unpaid (paid=0), partial (0<paid<net_due), paid (paid==net_due), overpaid (paid>net_due). Edge: when net_due<=0 and amount_paid<=0, status='unpaid' (could be 'credit' instead but not in scope)."
+}

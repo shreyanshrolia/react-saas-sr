@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -28,6 +28,7 @@ const DEFAULT_TYPES = ["Shirt", "Pant", "Saree", "Kurta", "Bedsheet", "Other"];
 export default function AddEntryScreen() {
   const { t } = useI18n();
   const router = useRouter();
+  const params = useLocalSearchParams<{ clientId?: string }>();
   const [clients, setClients] = useState<Client[]>([]);
   const [selected, setSelected] = useState<Client | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -43,19 +44,29 @@ export default function AddEntryScreen() {
     try {
       const data = await api.get<Client[]>("/clients");
       setClients(data);
+      // Priority for selection:
+      //  1. clientId from URL param (user explicitly picked this client)
+      //  2. Currently selected, if it still exists
+      //  3. First in the list
+      const fromParam = params.clientId ? data.find((c) => c.id === params.clientId) : null;
       setSelected((cur) => {
+        if (fromParam) return fromParam;
         if (cur) {
           const still = data.find((c) => c.id === cur.id);
           if (still) return still;
         }
         return data[0] ?? null;
       });
-      // refresh first item rate based on default if rate is still default 10
-      setItems((cur) => cur.map((it) => (it.rate === 10 && data[0] ? { ...it, rate: data[0].default_rate } : it)));
+      // Reset item rate if a client was just picked via URL
+      if (fromParam) {
+        setItems((cur) => cur.map((it) => ({ ...it, rate: fromParam.default_rate })));
+      } else {
+        setItems((cur) => cur.map((it) => (it.rate === 10 && data[0] ? { ...it, rate: data[0].default_rate } : it)));
+      }
     } catch (e: any) {
       setToast({ msg: e?.message || "Failed", variant: "error" });
     }
-  }, []);
+  }, [params.clientId]);
 
   // Re-fetch every time tab is focused so newly-added clients show up immediately
   useFocusEffect(useCallback(() => { loadClients(); }, [loadClients]));
