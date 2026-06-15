@@ -1413,6 +1413,7 @@ async def verify_subscription_payment(req: VerifyPaymentReq, user=Depends(get_cu
         }},
     )
     fresh = await _activate_subscription(user["_id"])
+    await _refresh_subscription(fresh)
     return to_user_public(fresh)
 
 
@@ -1424,6 +1425,7 @@ async def activate_subscription(req: SubscribeReq, user=Depends(get_current_user
     if req.plan != user["role"]:
         raise HTTPException(status_code=400, detail="Plan does not match user role")
     fresh = await _activate_subscription(user["_id"])
+    await _refresh_subscription(fresh)
     return to_user_public(fresh)
 
 
