@@ -80,6 +80,23 @@ export default function ClientDetail() {
 
   const filtered = entries.filter((e) => (filter === "all" ? true : e.status === filter));
 
+  const deleteClient = async () => {
+    if (!client) return;
+    try {
+      if (client.linked_user_id) {
+        await api.post(`/clients/${client.id}/delete-request`);
+        setToast({ msg: "Removal request sent to client", variant: "success" });
+        load();
+      } else {
+        await api.delete(`/clients/${client.id}`);
+        setToast({ msg: "Client deleted", variant: "success" });
+        setTimeout(() => router.back(), 600);
+      }
+    } catch (e: any) {
+      setToast({ msg: e?.message || "Failed", variant: "error" });
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}><View style={styles.center}><ActivityIndicator color={colors.primary} /></View></SafeAreaView>
@@ -95,8 +112,22 @@ export default function ClientDetail() {
           <Ionicons name="chevron-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{client.name}</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          testID="delete-client-button"
+          style={[styles.iconBtn, { backgroundColor: colors.dangerLight }]}
+          onPress={deleteClient}
+          disabled={!!client.delete_requested_at}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.danger} />
+        </TouchableOpacity>
       </View>
+
+      {client.delete_requested_at ? (
+        <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, backgroundColor: colors.warningLight, borderRadius: radius.md, flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Ionicons name="hourglass-outline" size={14} color={colors.warning} />
+          <Text style={{ fontSize: 12, color: colors.warning, fontWeight: "700", flex: 1 }}>Removal requested — awaiting client confirmation</Text>
+        </View>
+      ) : null}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={styles.profileBlock}>

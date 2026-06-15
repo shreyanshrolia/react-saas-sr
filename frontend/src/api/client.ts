@@ -74,6 +74,7 @@ export interface Client {
   address?: string | null;
   default_rate: number;
   linked_user_id?: string | null;
+  delete_requested_at?: string | null;
   created_at: string;
   pending_count: number;
   current_month_amount: number;
@@ -109,7 +110,10 @@ export interface Notification {
     | "return_denied"
     | "delete_requested"
     | "delete_confirmed"
-    | "delete_denied";
+    | "delete_denied"
+    | "client_delete_requested"
+    | "client_delete_confirmed"
+    | "client_delete_denied";
   title: string;
   message: string;
   entry_id?: string | null;

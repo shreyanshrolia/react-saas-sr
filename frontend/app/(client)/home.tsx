@@ -314,9 +314,23 @@ function EntryCard({
         </View>
       ) : null}
 
-      {isPending && !entry.delete_requested_at ? (
+      {entry.delete_requested_at ? (
+        <View style={styles.pendingNote}>
+          <Ionicons name="hourglass-outline" size={12} color={colors.warning} />
+          <Text style={styles.pendingNoteText}>Deletion requested — awaiting iron-man</Text>
+        </View>
+      ) : null}
+
+      {!isReturnPending && !entry.delete_requested_at ? (
         <View style={styles.entryFooter}>
-          <Text style={[styles.returnedLine, { color: colors.danger }]}>Not received yet</Text>
+          <View style={{ flex: 1 }}>
+            {isReturned && entry.date_returned ? (
+              <Text style={styles.returnedLine}>{t("returned_on")} {formatDate(entry.date_returned)}</Text>
+            ) : (
+              <Text style={[styles.returnedLine, { color: colors.danger }]}>Not received yet</Text>
+            )}
+          </View>
+          <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
           <TouchableOpacity
             testID={`request-delete-${entry.id}`}
             style={styles.deleteRequestBtn}
@@ -328,23 +342,11 @@ function EntryCard({
         </View>
       ) : null}
 
-      {entry.delete_requested_at ? (
-        <View style={styles.pendingNote}>
-          <Ionicons name="hourglass-outline" size={12} color={colors.warning} />
-          <Text style={styles.pendingNoteText}>Deletion requested — awaiting iron-man</Text>
+      {(isReturnPending || entry.delete_requested_at) ? (
+        <View style={[styles.entryFooter, { justifyContent: "flex-end", marginTop: spacing.sm }]}>
+          <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
         </View>
       ) : null}
-
-      {isReturned && entry.date_returned ? (
-        <View style={styles.entryFooter}>
-          <Text style={styles.returnedLine}>{t("returned_on")} {formatDate(entry.date_returned)}</Text>
-          <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
-        </View>
-      ) : (
-        <View style={[styles.entryFooter, { justifyContent: "flex-end" }]}>
-          <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
-        </View>
-      )}
     </View>
   );
 }

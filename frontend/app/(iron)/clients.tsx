@@ -32,6 +32,7 @@ export default function ClientsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [query, setQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; variant?: "success" | "error" } | null>(null);
 
   const load = useCallback(async () => {
@@ -85,11 +86,34 @@ export default function ClientsScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <FlatList
-          data={clients}
-          keyExtractor={(it) => it.id}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        <>
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={16} color={colors.textMuted} />
+            <TextInput
+              testID="client-search-input"
+              style={styles.searchInput}
+              placeholder="Search by name or phone"
+              placeholderTextColor={colors.textMuted}
+              value={query}
+              onChangeText={setQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {query.length > 0 ? (
+              <TouchableOpacity onPress={() => setQuery("")} testID="clear-client-search">
+                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <FlatList
+            data={clients.filter((c) => {
+              const q = query.trim().toLowerCase();
+              if (!q) return true;
+              return c.name.toLowerCase().includes(q) || c.phone.includes(q);
+            })}
+            keyExtractor={(it) => it.id}
+            contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           renderItem={({ item }) => (
             <View testID={`client-card-${item.id}`} style={styles.card}>
               <TouchableOpacity
@@ -130,6 +154,7 @@ export default function ClientsScreen() {
             </View>
           )}
         />
+        </>
       )}
 
       <AddClientModal
@@ -382,6 +407,15 @@ const styles = StyleSheet.create({
   cardRight: { alignItems: "flex-end", marginRight: 6 },
   amount: { fontSize: 15, fontWeight: "700", color: colors.text },
   amountLabel: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
+
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: spacing.xl, marginBottom: spacing.md,
+    paddingHorizontal: spacing.md, height: 42,
+    backgroundColor: colors.card, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.borderLight,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: colors.text, height: 42 },
 
   // modal
   modalBackdrop: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.4)", justifyContent: "flex-end" },

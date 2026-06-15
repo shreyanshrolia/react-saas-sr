@@ -106,6 +106,7 @@ class ClientPublic(BaseModel):
     address: Optional[str] = None
     default_rate: float = 10.0
     linked_user_id: Optional[str] = None  # set when client signs up
+    delete_requested_at: Optional[str] = None
     created_at: str
     pending_count: int = 0
     current_month_amount: float = 0.0
@@ -411,6 +412,7 @@ def to_client_public(c: dict, stats: dict) -> ClientPublic:
         address=c.get("address"),
         default_rate=float(c.get("default_rate", 10.0)),
         linked_user_id=c.get("linked_user_id"),
+        delete_requested_at=c.get("delete_requested_at"),
         created_at=c["created_at"],
         pending_count=stats["pending_count"],
         current_month_amount=stats["current_month_amount"],
@@ -480,13 +482,95 @@ async def update_client(client_id: str, req: ClientUpdateReq, user=Depends(get_c
 
 @api.delete("/clients/{client_id}")
 async def delete_client(client_id: str, user=Depends(get_current_user)):
+    """Hard-delete a client. Only allowed for iron-man IF the client is not signed up.
+    For signed-up clients, iron-man must use /clients/{id}/delete-request and the
+    client must confirm via /clients/{id}/delete-confirm."""
     require_iron(user)
-    res = await db.clients.delete_one({"_id": client_id, "iron_man_id": user["_id"]})
-    if res.deleted_count == 0:
+    c = await db.clients.find_one({"_id": client_id, "iron_man_id": user["_id"]})
+    if not c:
         raise HTTPException(status_code=404, detail="Client not found")
+    if c.get("linked_user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Client is signed up. Use /clients/{id}/delete-request and ask client to confirm.",
+        )
+    await db.clients.delete_one({"_id": client_id})
     await db.entries.delete_many({"client_id": client_id})
     await db.bills.delete_many({"client_id": client_id})
     return {"ok": True}
+
+
+@api.post("/clients/{client_id}/delete-request", response_model=ClientPublic)
+async def request_client_delete(client_id: str, user=Depends(get_current_user)):
+    """Iron man requests to remove a linked client. Client must confirm."""
+    require_iron(user)
+    c = await db.clients.find_one({"_id": client_id, "iron_man_id": user["_id"]})
+    if not c:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if not c.get("linked_user_id"):
+        raise HTTPException(status_code=400, detail="Client not linked. Use DELETE directly.")
+    await db.clients.update_one(
+        {"_id": client_id},
+        {"$set": {"delete_requested_at": iso(now_utc())}},
+    )
+    await _create_notification(
+        user_id=c["linked_user_id"],
+        type_="client_delete_requested",
+        title="Your Iron Man wants to remove you",
+        message=f"{user['name']} wants to remove you as a client. Confirm to delete your shared records, or deny to keep them.",
+        client_id=client_id,
+        iron_man_id=user["_id"],
+    )
+    c2 = await db.clients.find_one({"_id": client_id})
+    stats = await _client_stats(c2)
+    return to_client_public(c2, stats)
+
+
+@api.post("/clients/{client_id}/delete-confirm")
+async def confirm_client_delete(client_id: str, user=Depends(get_current_user)):
+    """Client confirms removal of the relationship; deletes client + entries + bills."""
+    require_client(user)
+    c = await db.clients.find_one({"_id": client_id, "linked_user_id": user["_id"]})
+    if not c:
+        raise HTTPException(status_code=404, detail="Client record not found")
+    if not c.get("delete_requested_at"):
+        raise HTTPException(status_code=400, detail="No delete request pending")
+    await db.clients.delete_one({"_id": client_id})
+    await db.entries.delete_many({"client_id": client_id})
+    await db.bills.delete_many({"client_id": client_id})
+    await _create_notification(
+        user_id=c["iron_man_id"],
+        type_="client_delete_confirmed",
+        title="Client removed",
+        message=f"{c['name']} confirmed removal. Records have been deleted.",
+        iron_man_id=c["iron_man_id"],
+    )
+    return {"ok": True}
+
+
+@api.post("/clients/{client_id}/delete-deny", response_model=ClientPublic)
+async def deny_client_delete(client_id: str, user=Depends(get_current_user)):
+    """Client denies the iron-man's removal request."""
+    require_client(user)
+    c = await db.clients.find_one({"_id": client_id, "linked_user_id": user["_id"]})
+    if not c:
+        raise HTTPException(status_code=404, detail="Client record not found")
+    if not c.get("delete_requested_at"):
+        raise HTTPException(status_code=400, detail="No delete request pending")
+    await db.clients.update_one(
+        {"_id": client_id}, {"$set": {"delete_requested_at": None}}
+    )
+    await _create_notification(
+        user_id=c["iron_man_id"],
+        type_="client_delete_denied",
+        title="Removal rejected",
+        message=f"{c['name']} did not approve removal. The relationship continues.",
+        client_id=client_id,
+        iron_man_id=c["iron_man_id"],
+    )
+    c2 = await db.clients.find_one({"_id": client_id})
+    stats = await _client_stats(c2)
+    return to_client_public(c2, stats)
 
 
 # ---------- Entries ----------

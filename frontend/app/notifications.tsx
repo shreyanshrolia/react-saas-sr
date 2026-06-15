@@ -25,6 +25,9 @@ const TYPE_ICON: Record<Notification["type"], { icon: any; color: string }> = {
   delete_requested: { icon: "trash-bin", color: colors.warning },
   delete_confirmed: { icon: "trash", color: colors.danger },
   delete_denied: { icon: "shield-checkmark", color: colors.success },
+  client_delete_requested: { icon: "person-remove", color: colors.danger },
+  client_delete_confirmed: { icon: "person-remove-outline", color: colors.danger },
+  client_delete_denied: { icon: "shield-checkmark", color: colors.success },
 };
 
 export default function NotificationsScreen() {
@@ -109,23 +112,55 @@ export default function NotificationsScreen() {
           }
           renderItem={({ item }) => {
             const ti = TYPE_ICON[item.type] || { icon: "alert-circle", color: colors.primary };
+            const showClientDeleteActions =
+              user?.role === "client" && item.type === "client_delete_requested" && item.client_id;
             return (
-              <TouchableOpacity
-                testID={`notif-${item.id}`}
-                style={[styles.row, !item.read && styles.rowUnread]}
-                onPress={() => onTap(item)}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.icon, { backgroundColor: ti.color + "20" }]}>
-                  <Ionicons name={ti.icon} size={20} color={ti.color} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, !item.read && { fontWeight: "800" }]}>{item.title}</Text>
-                  <Text style={styles.rowMessage} numberOfLines={2}>{item.message}</Text>
-                  <Text style={styles.rowDate}>{formatDate(item.created_at)}</Text>
-                </View>
-                {!item.read ? <View style={styles.unreadDot} /> : null}
-              </TouchableOpacity>
+              <View style={[styles.row, !item.read && styles.rowUnread]} testID={`notif-${item.id}`}>
+                <TouchableOpacity
+                  style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 }}
+                  onPress={() => onTap(item)}
+                  activeOpacity={0.85}
+                >
+                  <View style={[styles.icon, { backgroundColor: ti.color + "20" }]}>
+                    <Ionicons name={ti.icon} size={20} color={ti.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.rowTitle, !item.read && { fontWeight: "800" }]}>{item.title}</Text>
+                    <Text style={styles.rowMessage} numberOfLines={3}>{item.message}</Text>
+                    <Text style={styles.rowDate}>{formatDate(item.created_at)}</Text>
+                  </View>
+                  {!item.read ? <View style={styles.unreadDot} /> : null}
+                </TouchableOpacity>
+                {showClientDeleteActions ? (
+                  <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexBasis: "100%" }}>
+                    <TouchableOpacity
+                      testID={`deny-client-delete-${item.id}`}
+                      style={{ flex: 1, paddingVertical: 8, borderRadius: radius.md, backgroundColor: colors.bgSecondary, alignItems: "center" }}
+                      onPress={async () => {
+                        try {
+                          await api.post(`/clients/${item.client_id}/delete-deny`);
+                          markRead(item.id);
+                        } catch {/* ignore */}
+                      }}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: "700", fontSize: 12 }}>Keep relationship</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      testID={`confirm-client-delete-${item.id}`}
+                      style={{ flex: 1, paddingVertical: 8, borderRadius: radius.md, backgroundColor: colors.danger, alignItems: "center" }}
+                      onPress={async () => {
+                        try {
+                          await api.post(`/clients/${item.client_id}/delete-confirm`);
+                          markRead(item.id);
+                          load();
+                        } catch {/* ignore */}
+                      }}
+                    >
+                      <Text style={{ color: colors.textInverse, fontWeight: "700", fontSize: 12 }}>Delete my records</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
             );
           }}
         />
@@ -147,7 +182,7 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md },
   emptyText: { color: colors.textSecondary },
   row: {
-    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    flexDirection: "row", alignItems: "center", gap: spacing.md, flexWrap: "wrap",
     backgroundColor: colors.card, padding: spacing.lg, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.borderLight, marginBottom: spacing.sm,
   },

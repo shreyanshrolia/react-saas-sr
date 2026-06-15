@@ -24,7 +24,6 @@ import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
 import { formatDate, formatINR, formatMonth } from "@/src/utils/format";
 import Toast from "@/src/components/Toast";
-
 const STATUS_COLORS: Record<Bill["status"], { bg: string; fg: string; label: string }> = {
   paid: { bg: colors.successLight, fg: colors.success, label: "Paid" },
   overpaid: { bg: "#DBEAFE", fg: colors.primary, label: "Overpaid" },
@@ -39,6 +38,7 @@ export default function BillsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [filter, setFilter] = useState<"all" | "paid" | "unpaid">("all");
+  const [query, setQuery] = useState("");
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [toast, setToast] = useState<{ msg: string; variant?: "success" | "error" } | null>(null);
 
@@ -70,6 +70,8 @@ export default function BillsScreen() {
   };
 
   const filtered = bills.filter((b) => {
+    const q = query.trim().toLowerCase();
+    if (q && !b.client_name.toLowerCase().includes(q) && !b.client_phone.includes(q)) return false;
     if (filter === "all") return true;
     if (filter === "paid") return b.status === "paid" || b.status === "overpaid";
     return b.status === "unpaid" || b.status === "partial";
@@ -116,6 +118,25 @@ export default function BillsScreen() {
         <Chip label="All" active={filter === "all"} onPress={() => setFilter("all")} testID="filter-all" />
         <Chip label="Unpaid" active={filter === "unpaid"} onPress={() => setFilter("unpaid")} testID="filter-unpaid" />
         <Chip label="Paid" active={filter === "paid"} onPress={() => setFilter("paid")} testID="filter-paid" />
+      </View>
+
+      <View style={styles.searchWrap}>
+        <Ionicons name="search" size={16} color={colors.textMuted} />
+        <TextInput
+          testID="bill-search-input"
+          style={styles.searchInput}
+          placeholder="Search by client name or phone"
+          placeholderTextColor={colors.textMuted}
+          value={query}
+          onChangeText={setQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {query.length > 0 ? (
+          <TouchableOpacity onPress={() => setQuery("")} testID="clear-bill-search">
+            <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {loading ? (
@@ -432,6 +453,15 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
   chipTextActive: { color: colors.textInverse },
+
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: spacing.xl, marginBottom: spacing.md,
+    paddingHorizontal: spacing.md, height: 42,
+    backgroundColor: colors.card, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.borderLight,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: colors.text, height: 42 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md },
