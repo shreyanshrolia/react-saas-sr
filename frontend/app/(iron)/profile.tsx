@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -92,6 +92,26 @@ export default function ProfileScreen() {
               <Text style={[styles.langChipText, lang === "hi" && styles.langChipTextActive]}>{t("hindi")}</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Help &amp; Support</Text>
+          <TouchableOpacity
+            testID="helpline-call-button"
+            style={styles.helplineRow}
+            onPress={() => Linking.openURL("tel:6352172550")}
+            activeOpacity={0.85}
+          >
+            <View style={styles.helplineIcon}>
+              <Ionicons name="call" size={18} color={colors.textInverse} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.helplineLabel}>Grihkari Helpline</Text>
+              <Text style={styles.helplineNumber}>+91 63521 72550</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+          <Text style={styles.helplineHint}>Tap to call for any help</Text>
         </View>
 
         {confirmLogout ? (
@@ -189,4 +209,17 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: colors.text, fontWeight: "700" },
   logoutBtnDanger: { flex: 1, padding: 12, borderRadius: radius.md, backgroundColor: colors.danger, alignItems: "center" },
   logoutBtnDangerText: { color: colors.textInverse, fontWeight: "700" },
+
+  helplineRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    marginTop: spacing.md, padding: spacing.md,
+    backgroundColor: colors.bgSecondary, borderRadius: radius.md,
+  },
+  helplineIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.success, alignItems: "center", justifyContent: "center",
+  },
+  helplineLabel: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
+  helplineNumber: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 2 },
+  helplineHint: { fontSize: 11, color: colors.textMuted, marginTop: 6, fontStyle: "italic" },
 });

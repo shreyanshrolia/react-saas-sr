@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,14 +12,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api, type Client, type EntryItem } from "@/src/api/client";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
-import { formatINR } from "@/src/utils/format";
+import { formatDate, formatINR } from "@/src/utils/format";
 import Toast from "@/src/components/Toast";
 
 const DEFAULT_TYPES = ["Shirt", "Pant", "Saree", "Kurta", "Bedsheet", "Other"];
@@ -32,6 +33,8 @@ export default function AddEntryScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [items, setItems] = useState<EntryItem[]>([{ cloth_type: "Shirt", quantity: 1, rate: 10 }]);
   const [notes, setNotes] = useState("");
+  const [dateGiven, setDateGiven] = useState<Date>(new Date());
+  const [showDate, setShowDate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [toast, setToast] = useState<{ msg: string; variant?: "success" | "error" } | null>(null);
@@ -40,18 +43,22 @@ export default function AddEntryScreen() {
     try {
       const data = await api.get<Client[]>("/clients");
       setClients(data);
-      if (data.length > 0 && !selected) {
-        setSelected(data[0]);
-        setItems((cur) => cur.map((it) => ({ ...it, rate: it.rate || data[0].default_rate })));
-      }
+      setSelected((cur) => {
+        if (cur) {
+          const still = data.find((c) => c.id === cur.id);
+          if (still) return still;
+        }
+        return data[0] ?? null;
+      });
+      // refresh first item rate based on default if rate is still default 10
+      setItems((cur) => cur.map((it) => (it.rate === 10 && data[0] ? { ...it, rate: data[0].default_rate } : it)));
     } catch (e: any) {
       setToast({ msg: e?.message || "Failed", variant: "error" });
     }
-  }, [selected]);
+  }, []);
 
-  useEffect(() => {
-    loadClients();
-  }, [loadClients]);
+  // Re-fetch every time tab is focused so newly-added clients show up immediately
+  useFocusEffect(useCallback(() => { loadClients(); }, [loadClients]));
 
   const total = items.reduce((s, it) => s + (it.quantity || 0) * (it.rate || 0), 0);
   const totalQty = items.reduce((s, it) => s + (it.quantity || 0), 0);
@@ -78,16 +85,28 @@ export default function AddEntryScreen() {
     }
     setLoading(true);
     try {
-      await api.post("/entries", { client_id: selected.id, items, notes: notes.trim() || undefined });
+      await api.post("/entries", {
+        client_id: selected.id,
+        date_given: dateGiven.toISOString(),
+        items,
+        notes: notes.trim() || undefined,
+      });
+      const savedClientName = selected.name;
       setItems([{ cloth_type: "Shirt", quantity: 1, rate: selected.default_rate || 10 }]);
       setNotes("");
-      setToast({ msg: t("success"), variant: "success" });
-      setTimeout(() => router.push("/(iron)/clients"), 600);
+      setDateGiven(new Date());
+      setToast({ msg: `${t("success")}: ${savedClientName}`, variant: "success" });
+      setTimeout(() => router.push("/(iron)/clients"), 700);
     } catch (e: any) {
       setErr(e?.message || "Failed");
     } finally {
       setLoading(false);
     }
+  };
+
+  const onDateChange = (_: any, selectedDate?: Date) => {
+    if (Platform.OS === "android") setShowDate(false);
+    if (selectedDate) setDateGiven(selectedDate);
   };
 
   return (
@@ -121,6 +140,34 @@ export default function AddEntryScreen() {
             )}
             <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
           </TouchableOpacity>
+
+          <Text style={styles.label}>{t("given_on")}</Text>
+          <TouchableOpacity
+            testID="date-picker-button"
+            style={styles.dateBtn}
+            onPress={() => setShowDate(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+            <Text style={styles.dateBtnText}>{formatDate(dateGiven.toISOString())}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textMuted} style={{ marginLeft: "auto" }} />
+          </TouchableOpacity>
+          {showDate && (
+            <>
+              <DateTimePicker
+                value={dateGiven}
+                mode="date"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                maximumDate={new Date()}
+                onChange={onDateChange}
+              />
+              {Platform.OS === "ios" && (
+                <TouchableOpacity style={styles.iosDoneBtn} onPress={() => setShowDate(false)}>
+                  <Text style={styles.iosDoneText}>Done</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
 
           <View style={{ marginTop: spacing.xl }}>
             <Text style={styles.label}>{t("items")}</Text>
@@ -250,7 +297,7 @@ export default function AddEntryScreen() {
                   style={[styles.pickerItem, selected?.id === c.id && styles.pickerItemActive]}
                   onPress={() => {
                     setSelected(c);
-                    setItems((cur) => cur.map((it) => ({ ...it, rate: it.rate || c.default_rate })));
+                    setItems((cur) => cur.map((it) => ({ ...it, rate: c.default_rate })));
                     setPickerOpen(false);
                   }}
                 >
@@ -290,6 +337,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center",
   },
   avatarText: { fontSize: 15, fontWeight: "700", color: colors.primary },
+
+  dateBtn: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.card, padding: spacing.md, paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, height: 52,
+  },
+  dateBtnText: { fontSize: 15, color: colors.text, fontWeight: "600" },
+  iosDoneBtn: {
+    backgroundColor: colors.primary, paddingVertical: 10, borderRadius: radius.md,
+    alignItems: "center", marginTop: spacing.sm,
+  },
+  iosDoneText: { color: colors.textInverse, fontWeight: "700" },
 
   itemRow: {
     backgroundColor: colors.card, padding: spacing.md, borderRadius: radius.lg,

@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 2 backend-only testing. Added /app/backend/tests/test_iteration2.py with 6 new tests focused on (1) date_given drives month_key (bill/report aggregation uses chosen month), (2) entry client_id integrity bug-fix - entries always belong to the specified client_id regardless of signup status and don't reassign when other users sign up, (3) GET /api/entries returns both pending+returned for iron_man and linked client, (4) linked_user_id is propagated from client record onto new entry docs so the linked client sees them. Full suite (iteration 1 + 2) = 28/28 passing (100%).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/entries", "issue": "date_given parsing falls back to now_utc() silently on invalid ISO string (parse_iso swallows exceptions). Consider 400 on malformed date so callers don't get wrong month_key."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_flows.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/pytest_iter2.xml"
+  ],
+  "action_items": [
+    "Optional: harden parse_iso to reject malformed date_given with 400 instead of silently defaulting to now() (could cause wrong month bucketing).",
+    "Optional: also stamp linked_user_id retroactively onto historical entries when a client signs up later (currently only future entries get linked_user_id at creation time; existing entries created before signup will not appear in client GET /api/entries because linked_user_id is null on them). This is not in scope of iteration 2 but worth tracking."
+  ],
+  "critical_code_review_comments": [
+    "create_entry copies linked_user_id from client doc at write time only - correct for iteration 2 fix. But if iron_man adds entries BEFORE client signs up, those entries will have linked_user_id=null and the client will never see them after signup. Consider a migration step on /auth/signup that also updates db.entries where phone matches.",
+    "parse_iso silently returns now_utc() on bad input - hides client errors. Recommend raising HTTPException(400)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2.py (new)"
+  ],
+  "success_rate": {"backend": "100% (28/28, including 6 new iteration-2 tests)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Used seed users from /app/memory/test_credentials.md (9999999991 iron_man / 9999999992 client). New tests create TEST_-prefixed clients with random fresh phones, create entries, and clean both up in finally blocks. test_entry_stays_with_original_client_after_other_signs_up signs up a single new throwaway client user (random phone starting with 8...) - this user persists in DB but does not interfere with anything.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run `pytest /app/backend/tests/ -v` from /app/backend. All 28 tests are idempotent via signup-or-login pattern with cleanup. iteration-2 tests use random phones starting with '8' to avoid colliding with seed users. Stale TEST_* throwaway client signup rows may accumulate in db.users over many runs - drop the users collection if desired (but seed users 9999999991/2 must remain).",
+  "rca_of_issue": "Bug from iteration 1 (entries going to wrong client when iron_man added entry for an unsigned client): verified fixed at backend layer. create_entry uses req.client_id to fetch the exact client doc (find_one with client_id + iron_man_id), then stamps entry with c['_id'], c['name'], c['phone'], c['linked_user_id']. There is no phone-based fallback that could misroute. Test test_entry_goes_to_specified_client_not_signed_up creates 2 clients A & B with no signup, posts entry with client_id=B, asserts entry.client_id==B.id and is absent from A's list - PASS. Original front-end root cause was stale clients list in add-entry tab (Expo Router keeps tabs mounted); main agent fixed with useFocusEffect. Backend was already correct; this iteration confirms backend cannot misroute even if a stale client_id is passed (it will 404 instead). Note: front-end fix not retested here per backend-only request."
+}

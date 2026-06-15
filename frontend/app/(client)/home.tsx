@@ -1,5 +1,14 @@
 import { useCallback, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Linking,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +19,8 @@ import { useI18n } from "@/src/i18n/I18nContext";
 import { colors, radius, spacing } from "@/src/theme/colors";
 import { currentMonthKey, formatDate, formatINR } from "@/src/utils/format";
 
+type Filter = "all" | "pending" | "returned";
+
 export default function ClientHome() {
   const { user } = useAuth();
   const { t } = useI18n();
@@ -18,12 +29,13 @@ export default function ClientHome() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const load = useCallback(async () => {
     try {
       const [im, en, bi] = await Promise.all([
         api.get<IronManLink[]>("/my/iron-men"),
-        api.get<Entry[]>("/entries?status_filter=pending"),
+        api.get<Entry[]>("/entries"),
         api.get<Bill[]>("/bills"),
       ]);
       setIronMen(im);
@@ -43,15 +55,24 @@ export default function ClientHome() {
   const monthAmount = bills
     .filter((b) => b.month === cm)
     .reduce((s, b) => s + b.total_amount, 0);
-  const unpaidAmount = bills
-    .filter((b) => !b.paid)
-    .reduce((s, b) => s + b.total_amount, 0);
+  const pendingCount = entries.filter((e) => e.status === "pending").length;
+  const returnedCount = entries.filter((e) => e.status === "returned").length;
+
+  const filteredEntries = entries.filter((e) =>
+    filter === "all" ? true : e.status === filter,
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: 100 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(); }}
+            tintColor={colors.primary}
+          />
+        }
       >
         <View style={styles.header}>
           <View>
@@ -71,16 +92,14 @@ export default function ClientHome() {
               <Text style={styles.heroLabel}>{t("this_month")}</Text>
               <Text style={styles.heroAmount}>{formatINR(monthAmount)}</Text>
               <View style={styles.heroRow}>
-                <View style={styles.heroPill}>
-                  <Ionicons name="time-outline" size={14} color={colors.textInverse} />
-                  <Text style={styles.heroPillText}>{entries.length} {t("pending")}</Text>
+                <View style={[styles.heroPill, { backgroundColor: "rgba(254, 226, 226, 0.95)" }]}>
+                  <View style={[styles.dot, { backgroundColor: colors.danger }]} />
+                  <Text style={[styles.heroPillText, { color: colors.danger }]}>{pendingCount} {t("pending")}</Text>
                 </View>
-                {unpaidAmount > 0 ? (
-                  <View style={styles.heroPill}>
-                    <Ionicons name="alert-circle-outline" size={14} color={colors.textInverse} />
-                    <Text style={styles.heroPillText}>{formatINR(unpaidAmount)} {t("unpaid")}</Text>
-                  </View>
-                ) : null}
+                <View style={[styles.heroPill, { backgroundColor: "rgba(220, 252, 231, 0.95)" }]}>
+                  <View style={[styles.dot, { backgroundColor: colors.success }]} />
+                  <Text style={[styles.heroPillText, { color: colors.success }]}>{returnedCount} {t("returned")}</Text>
+                </View>
               </View>
             </View>
 
@@ -97,7 +116,13 @@ export default function ClientHome() {
                 </View>
               ) : (
                 ironMen.map((im) => (
-                  <View key={im.iron_man_id} style={styles.imCard} testID={`im-card-${im.iron_man_id}`}>
+                  <TouchableOpacity
+                    key={im.iron_man_id}
+                    style={styles.imCard}
+                    testID={`im-card-${im.iron_man_id}`}
+                    activeOpacity={0.85}
+                    onPress={() => Linking.openURL(`tel:${im.iron_man_phone}`)}
+                  >
                     <View style={styles.imAvatar}>
                       <Ionicons name="hammer" size={20} color={colors.primary} />
                     </View>
@@ -109,34 +134,142 @@ export default function ClientHome() {
                       <Text style={styles.rateLabel}>Rate</Text>
                       <Text style={styles.rateVal}>{formatINR(im.default_rate)}</Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t("your_clothes")} ({t("pending")})</Text>
-              {entries.length === 0 ? (
+              <View style={styles.recordsHeader}>
+                <Text style={styles.sectionTitle}>{t("your_clothes")}</Text>
+                <Text style={styles.recordsCount}>{entries.length} total</Text>
+              </View>
+
+              {/* Filter chips */}
+              <View style={styles.filtersRow}>
+                <FilterChip
+                  label={`All (${entries.length})`}
+                  active={filter === "all"}
+                  onPress={() => setFilter("all")}
+                  testID="record-filter-all"
+                />
+                <FilterChip
+                  label={`${t("pending")} (${pendingCount})`}
+                  active={filter === "pending"}
+                  onPress={() => setFilter("pending")}
+                  testID="record-filter-pending"
+                  accent="danger"
+                />
+                <FilterChip
+                  label={`${t("returned")} (${returnedCount})`}
+                  active={filter === "returned"}
+                  onPress={() => setFilter("returned")}
+                  testID="record-filter-returned"
+                  accent="success"
+                />
+              </View>
+
+              {filteredEntries.length === 0 ? (
                 <View style={styles.emptyCard}>
                   <Ionicons name="shirt-outline" size={32} color={colors.textMuted} />
-                  <Text style={styles.emptyText}>No pending clothes</Text>
+                  <Text style={styles.emptyText}>No records to show</Text>
                 </View>
               ) : (
-                entries.slice(0, 5).map((e) => (
-                  <View key={e.id} style={styles.entryCard} testID={`entry-${e.id}`}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.entryDate}>{formatDate(e.date_given)}</Text>
-                      <Text style={styles.entrySub}>{e.total_quantity} {t("pieces")} • {e.items.length} {t("items")}</Text>
-                    </View>
-                    <Text style={styles.entryAmount}>{formatINR(e.total_amount)}</Text>
-                  </View>
-                ))
+                filteredEntries.map((e) => <EntryCard key={e.id} entry={e} t={t} />)
               )}
             </View>
           </>
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onPress,
+  testID,
+  accent,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  testID?: string;
+  accent?: "danger" | "success";
+}) {
+  const activeBg = accent === "danger" ? colors.danger : accent === "success" ? colors.success : colors.primary;
+  return (
+    <TouchableOpacity
+      testID={testID}
+      style={[styles.chip, active && { backgroundColor: activeBg, borderColor: activeBg }]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function EntryCard({ entry, t }: { entry: Entry; t: (k: any) => string }) {
+  const isReturned = entry.status === "returned";
+  return (
+    <View
+      style={[
+        styles.entryCard,
+        {
+          borderLeftColor: isReturned ? colors.success : colors.danger,
+          backgroundColor: isReturned ? "rgba(220, 252, 231, 0.35)" : "rgba(254, 226, 226, 0.35)",
+        },
+      ]}
+      testID={`record-${entry.id}`}
+    >
+      <View style={styles.entryHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.entryDate}>{formatDate(entry.date_given)}</Text>
+          <Text style={styles.entrySub}>
+            {entry.total_quantity} {t("pieces")} • {entry.items.length} {t("items")}
+          </Text>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: isReturned ? colors.success : colors.danger }]}>
+          <Ionicons
+            name={isReturned ? "checkmark-circle" : "time"}
+            size={12}
+            color={colors.textInverse}
+          />
+          <Text style={styles.statusText}>
+            {isReturned ? t("returned") : t("pending")}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.itemsList}>
+        {entry.items.map((it, i) => (
+          <View key={i} style={styles.itemPill}>
+            <Text style={styles.itemPillText}>
+              {it.cloth_type} × {it.quantity}
+            </Text>
+            <Text style={styles.itemPillRate}>@ {formatINR(it.rate)}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.entryFooter}>
+        <View style={{ flex: 1 }}>
+          {isReturned && entry.date_returned ? (
+            <Text style={styles.returnedLine}>
+              {t("returned_on")} {formatDate(entry.date_returned)}
+            </Text>
+          ) : (
+            <Text style={[styles.returnedLine, { color: colors.danger }]}>
+              Not received yet
+            </Text>
+          )}
+          {entry.notes ? <Text style={styles.notes}>{entry.notes}</Text> : null}
+        </View>
+        <Text style={styles.entryAmount}>{formatINR(entry.total_amount)}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -157,11 +290,22 @@ const styles = StyleSheet.create({
   heroLabel: { color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 },
   heroAmount: { color: colors.textInverse, fontSize: 38, fontWeight: "800", marginTop: 4 },
   heroRow: { flexDirection: "row", gap: 8, marginTop: spacing.md, flexWrap: "wrap" },
-  heroPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: "rgba(255,255,255,0.18)" },
-  heroPillText: { color: colors.textInverse, fontSize: 11, fontWeight: "700" },
+  heroPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  heroPillText: { fontSize: 12, fontWeight: "700" },
 
   section: { paddingHorizontal: spacing.lg, marginTop: spacing.lg },
   sectionTitle: { fontSize: 12, fontWeight: "700", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: spacing.md },
+  recordsHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
+  recordsCount: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
+
+  filtersRow: { flexDirection: "row", gap: 8, marginBottom: spacing.md, flexWrap: "wrap" },
+  chip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+  },
+  chipText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
+  chipTextActive: { color: colors.textInverse },
 
   emptyCard: { alignItems: "center", padding: spacing.xl, backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderLight, gap: spacing.sm },
   emptyText: { fontSize: 13, color: colors.textSecondary, textAlign: "center" },
@@ -179,12 +323,39 @@ const styles = StyleSheet.create({
   rateLabel: { fontSize: 10, color: colors.textMuted, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
   rateVal: { fontSize: 14, fontWeight: "700", color: colors.text, marginTop: 2 },
 
+  // Entry/record card
   entryCard: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: colors.card, padding: spacing.lg, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: colors.borderLight, marginBottom: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderLeftWidth: 5,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
   },
-  entryDate: { fontSize: 14, fontWeight: "700", color: colors.text },
+  entryHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  entryDate: { fontSize: 15, fontWeight: "800", color: colors.text },
   entrySub: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  entryAmount: { fontSize: 16, fontWeight: "800", color: colors.primary },
+  statusBadge: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill,
+  },
+  statusText: { fontSize: 11, fontWeight: "800", color: colors.textInverse },
+  itemsList: {
+    flexDirection: "row", flexWrap: "wrap", gap: 6,
+    marginTop: spacing.md, paddingTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.borderLight,
+  },
+  itemPill: {
+    flexDirection: "row", gap: 6,
+    backgroundColor: colors.card, paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border,
+  },
+  itemPillText: { fontSize: 12, fontWeight: "700", color: colors.text },
+  itemPillRate: { fontSize: 11, color: colors.textMuted },
+
+  entryFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
+  returnedLine: { fontSize: 11, color: colors.success, fontWeight: "600" },
+  notes: { fontSize: 11, color: colors.textMuted, fontStyle: "italic", marginTop: 2 },
+  entryAmount: { fontSize: 18, fontWeight: "800", color: colors.primary },
 });
