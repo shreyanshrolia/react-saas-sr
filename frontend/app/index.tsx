@@ -1,16 +1,29 @@
-import { Text, View, StyleSheet, Image } from "react-native";
-
-const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { useEffect } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { useAuth } from "@/src/contexts/AuthContext";
+import { colors } from "@/src/theme/colors";
 
 export default function Index() {
-  console.log(EXPO_PUBLIC_BACKEND_URL, "EXPO_PUBLIC_BACKEND_URL");
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace("/(auth)/login");
+    } else if (user.role === "iron_man") {
+      router.replace("/(iron)/clients");
+    } else {
+      router.replace("/(client)/home");
+    }
+  }, [user, loading, router]);
 
   return (
-    <View style={styles.container}>
-      <Image
-        source={require("../assets/images/app-image.png")}
-        style={styles.image}
-      />
+    <View style={styles.container} testID="splash-screen">
+      <Text style={styles.brand}>गृहकारी</Text>
+      <Text style={styles.brandEn}>Grihkari</Text>
+      <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
     </View>
   );
 }
@@ -18,13 +31,20 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0c0c0c",
+    backgroundColor: colors.bg,
     alignItems: "center",
     justifyContent: "center",
   },
-  image: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "contain",
+  brand: {
+    fontSize: 42,
+    fontWeight: "700",
+    color: colors.primary,
+    letterSpacing: 1,
+  },
+  brandEn: {
+    fontSize: 18,
+    color: colors.textSecondary,
+    marginTop: 4,
+    letterSpacing: 4,
   },
 });
