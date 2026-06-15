@@ -119,15 +119,21 @@ frontend:
 
   - task: "Admin Panel UI - Dashboard (list + search + reset password)"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/app/(admin)/dashboard.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
           comment: "Dashboard lists users via GET /api/admin/users?admin_token=... with debounced search by name/phone. Each user row has a Reset button that opens a modal to enter (or auto-generate) a new password, posting to POST /api/admin/users/{user_id}/reset-password. Success modal shows credentials to share. 401 responses clear admin token and route back to admin login. Sign-out clears the admin token."
+        - working: false
+          agent: "testing"
+          comment: "Iter 6: All flows pass except logout. Alert.alert on react-native-web does not fire multi-button onPress handlers, so the admin can never sign out from the web preview."
+        - working: true
+          agent: "main"
+          comment: "Replaced Alert.alert with a state-driven RN Modal (testIDs admin-logout-cancel, admin-logout-confirm). Verified via Playwright on web: clicking admin-logout shows modal; admin-logout-confirm clears token and routes to /(admin)/login. Reset/search/list flows untouched."
 
   - task: "Admin API client (frontend)"
     implemented: true

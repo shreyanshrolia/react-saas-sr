@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -36,6 +35,8 @@ export default function AdminDashboardScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [resetErr, setResetErr] = useState("");
   const [successUser, setSuccessUser] = useState<{ name: string; phone: string; password: string } | null>(null);
+
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   const fetchUsers = useCallback(async (q?: string) => {
     setErr("");
@@ -120,18 +121,12 @@ export default function AdminDashboardScreen() {
     setShowPw(true);
   };
 
-  const logout = () => {
-    Alert.alert("Sign out?", "You will return to the admin login screen.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign out",
-        style: "destructive",
-        onPress: async () => {
-          await clearAdminToken();
-          router.replace("/(admin)/login");
-        },
-      },
-    ]);
+  const logout = () => setLogoutOpen(true);
+
+  const confirmLogout = async () => {
+    setLogoutOpen(false);
+    await clearAdminToken();
+    router.replace("/(admin)/login");
   };
 
   const roleBadge = (role: AdminUser["role"]) => {
@@ -263,6 +258,44 @@ export default function AdminDashboardScreen() {
           }
         />
       )}
+
+      {/* Logout confirmation modal */}
+      <Modal
+        visible={logoutOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setLogoutOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setLogoutOpen(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Sign out?</Text>
+              <TouchableOpacity onPress={() => setLogoutOpen(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalBody}>You will return to the admin login screen.</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                testID="admin-logout-cancel"
+                style={styles.secondaryBtn}
+                onPress={() => setLogoutOpen(false)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="admin-logout-confirm"
+                style={[styles.primaryBtn, styles.dangerBtn, { flex: 1, marginTop: 0 }]}
+                onPress={confirmLogout}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryBtnText}>Sign out</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Reset password modal */}
       <Modal
@@ -538,6 +571,22 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.7 },
   primaryBtnText: { color: colors.textInverse, fontSize: 15, fontWeight: "700" },
+
+  modalBody: { fontSize: 14, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 20 },
+  modalActions: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
+  secondaryBtn: {
+    borderRadius: radius.lg,
+    height: 50,
+    paddingHorizontal: spacing.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    flex: 1,
+  },
+  secondaryBtnText: { color: colors.text, fontSize: 15, fontWeight: "700" },
+  dangerBtn: { backgroundColor: colors.danger },
 
   // Success modal
   successIcon: { alignItems: "center", marginBottom: spacing.sm },
